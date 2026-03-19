@@ -154,24 +154,42 @@ function getStatus() {
   };
 }
 
-function startDemoUpdate() {
+function startDemoUpdate(options = {}) {
   if (demoTimer) {
     throw new Error('An update is already running.');
   }
 
+  const forceInstall = Boolean(options.forceInstall);
+
   ensureDataDir();
   fs.writeFileSync(logFile, '', 'utf8');
-  writeStatus({ status: 'running', running: true, message: 'Starting demo update.', pid: process.pid });
+  writeStatus({
+    status: 'running',
+    running: true,
+    message: forceInstall ? 'Starting demo repair install.' : 'Starting demo update.',
+    pid: process.pid,
+  });
 
-  const lines = [
-    'Checking whether a newer GitHub version exists...',
-    'Fetching latest code from origin/main...',
-    'Installing backend dependencies...',
-    'Installing frontend dependencies...',
-    'Building frontend assets...',
-    'Restarting wiregate service...',
-    'Update completed successfully.',
-  ];
+  const lines = forceInstall
+    ? [
+        'Skipping GitHub version check because repair mode was requested...',
+        'Re-running the installer like a fresh server setup...',
+        'Installing backend dependencies...',
+        'Installing frontend dependencies...',
+        'Building frontend assets...',
+        'Restarting wiregate service...',
+        'Repair install completed successfully.',
+      ]
+    : [
+        'Checking whether a newer GitHub version exists...',
+        'Fetching latest code from origin/main...',
+        'Re-running the installer like a fresh server setup...',
+        'Installing backend dependencies...',
+        'Installing frontend dependencies...',
+        'Building frontend assets...',
+        'Restarting wiregate service...',
+        'Update completed successfully.',
+      ];
 
   let index = 0;
   demoTimer = setInterval(() => {
@@ -189,12 +207,13 @@ function startDemoUpdate() {
 
   return {
     ok: true,
-    message: 'Demo update started.',
+    message: forceInstall ? 'Demo repair install started.' : 'Demo update started.',
   };
 }
 
-function startRealUpdate() {
+function startRealUpdate(options = {}) {
   const scriptPath = path.join(repoRoot, 'update.sh');
+  const forceInstall = Boolean(options.forceInstall);
 
   if (!fs.existsSync(scriptPath)) {
     throw new Error('update.sh not found in the repository root.');
@@ -212,6 +231,10 @@ function startRealUpdate() {
     cwd: repoRoot,
     detached: true,
     stdio: 'ignore',
+    env: {
+      ...process.env,
+      FORCE_INSTALL: forceInstall ? 'true' : 'false',
+    },
   });
 
   child.unref();
@@ -220,21 +243,21 @@ function startRealUpdate() {
 
   return {
     ok: true,
-    message: 'Update started.',
+    message: forceInstall ? 'Repair install started.' : 'Update started.',
     pid: child.pid,
   };
 }
 
-function startUpdate() {
+function startUpdate(options = {}) {
   if (isDemoMode()) {
-    return startDemoUpdate();
+    return startDemoUpdate(options);
   }
 
   if (process.platform !== 'linux') {
     throw new Error('Real updates are only supported on the Ubuntu server.');
   }
 
-  return startRealUpdate();
+  return startRealUpdate(options);
 }
 
 module.exports = {

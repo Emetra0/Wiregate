@@ -105,6 +105,7 @@ cd "${REPO_DIR}"
 
 BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)"
 CURRENT_COMMIT="$(git rev-parse HEAD 2>/dev/null || true)"
+FORCE_INSTALL="${FORCE_INSTALL:-false}"
 
 echo "[$(ts)] Preserving local configuration files"
 backup_local_state
@@ -114,7 +115,7 @@ git fetch --all --prune
 
 REMOTE_COMMIT="$(git rev-parse "origin/${BRANCH}" 2>/dev/null || true)"
 
-if [[ -n "${CURRENT_COMMIT}" && -n "${REMOTE_COMMIT}" && "${CURRENT_COMMIT}" == "${REMOTE_COMMIT}" ]]; then
+if [[ "${FORCE_INSTALL,,}" != "true" && -n "${CURRENT_COMMIT}" && -n "${REMOTE_COMMIT}" && "${CURRENT_COMMIT}" == "${REMOTE_COMMIT}" ]]; then
   UPDATE_AVAILABLE=false
   echo "[$(ts)] Already on the latest version (${CURRENT_COMMIT})"
   finish_uptodate
@@ -123,25 +124,25 @@ fi
 
 UPDATE_AVAILABLE=true
 
+if [[ "${FORCE_INSTALL,,}" == "true" ]]; then
+  echo "[$(ts)] Force install requested. Re-running the installer even if the current version is already installed."
+  write_status "running" true "Force install requested. Re-running the full installer..."
+fi
+
 echo "[$(ts)] Pulling latest code"
 write_status "running" true "Pulling the newest GitHub version..."
 git pull --ff-only origin "${BRANCH}"
 
 CURRENT_COMMIT="$(git rev-parse HEAD 2>/dev/null || true)"
 
-write_status "running" true "Installing backend dependencies..."
-echo "[$(ts)] Installing backend dependencies"
-npm --prefix backend install
-
-write_status "running" true "Installing frontend dependencies..."
-echo "[$(ts)] Installing frontend dependencies"
-npm --prefix frontend install
-
-write_status "running" true "Building frontend assets..."
-echo "[$(ts)] Building frontend"
-npm --prefix frontend run build
-
 echo "[$(ts)] Restoring local configuration files"
+restore_local_state
+
+write_status "running" true "Re-running the full installer on the updated code..."
+echo "[$(ts)] Running install.sh to apply the update like a fresh server install"
+SKIP_REPO_SYNC=true bash ./install.sh
+
+echo "[$(ts)] Restoring local configuration files again after installer run"
 restore_local_state
 
 if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files | grep -q '^wiregate.service'; then

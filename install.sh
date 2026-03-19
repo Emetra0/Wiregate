@@ -39,6 +39,10 @@ ensure_base_packages() {
     packages+=(iproute2)
   fi
 
+  if ! command -v iptables >/dev/null 2>&1; then
+    packages+=(iptables)
+  fi
+
   if [[ "${#packages[@]}" -gt 0 ]]; then
     echo "Installing required base packages: ${packages[*]}"
     apt update
@@ -65,6 +69,11 @@ ensure_node() {
 }
 
 sync_repo() {
+  if [[ "${SKIP_REPO_SYNC:-false}" == "true" ]]; then
+    echo "Skipping repository sync because SKIP_REPO_SYNC=true."
+    return
+  fi
+
   if [[ -d "${WIREGATE_DIR}/.git" ]]; then
     echo "Git repository detected. Pulling latest changes..."
     git -C "${WIREGATE_DIR}" pull --ff-only || true
@@ -89,6 +98,128 @@ sync_repo() {
 prepare_env() {
   if [[ ! -f "${WIREGATE_DIR}/.env" ]]; then
     cp "${WIREGATE_DIR}/.env.example" "${WIREGATE_DIR}/.env"
+  fi
+}
+
+is_placeholder_value() {
+  local value="$1"
+  [[ -z "${value}" || "${value}" == YOUR_* ]]
+}
+
+default_env_value() {
+  local key="$1"
+  local fallback="$2"
+  local current
+  current="$(read_env_value "${key}")"
+
+  if [[ -z "${current}" ]]; then
+    write_env_value "${key}" "${fallback}"
+    echo "${fallback}"
+    return
+  fi
+
+  echo "${current}"
+}
+
+get_primary_ip() {
+  hostname -I | awk '{print $1}'
+}
+
+get_default_interface() {
+  ip route show default | awk 'NR==1 {print $5}'
+}
+
+ensure_ip_forwarding() {
+  cat >/etc/sysctl.d/99-wiregate.conf <<EOF
+net.ipv4.ip_forward=1
+EOF
+  sysctl --system >/dev/null
+}
+
+extract_private_key_from_config() {
+  local config_file="$1"
+  awk -F ' = ' '/^PrivateKey = / {print $2; exit}' "${config_file}"
+}
+
+ensure_wireguard_bootstrap() {
+  local auto_setup demo_mode iface subnet listen_port endpoint config_file private_key_file public_key_file private_key public_key outbound_iface
+
+  auto_setup="$(default_env_value AUTO_SETUP_WIREGUARD true)"
+  demo_mode="$(default_env_value DEMO_MODE true)"
+
+  if [[ "${auto_setup,,}" != "true" ]]; then
+    echo "Automatic WireGuard bootstrap disabled. Skipping interface setup."
+    return
+  fi
+
+  iface="$(default_env_value WG_INTERFACE wg0)"
+  subnet="$(default_env_value WG_SUBNET 10.0.0)"
+  listen_port="$(default_env_value WG_SERVER_PORT 51820)"
+  endpoint="$(read_env_value WG_SERVER_ENDPOINT)"
+
+  config_file="/etc/wireguard/${iface}.conf"
+  private_key_file="/etc/wireguard/${iface}.key"
+  public_key_file="/etc/wireguard/${iface}.pub"
+
+  mkdir -p /etc/wireguard
+  chmod 700 /etc/wireguard
+
+  if [[ -f "${config_file}" ]]; then
+    echo "Existing WireGuard config detected at ${config_file}. Syncing keys into WireGate."
+    private_key="$(extract_private_key_from_config "${config_file}")"
+    if [[ -n "${private_key}" ]]; then
+      public_key="$(printf '%s' "${private_key}" | wg pubkey)"
+    fi
+  else
+    echo "No WireGuard config found for ${iface}. Bootstrapping a new server interface."
+    outbound_iface="$(get_default_interface)"
+
+    if [[ -z "${outbound_iface}" ]]; then
+      echo "Unable to detect the default outbound network interface for NAT."
+      exit 1
+    fi
+
+    umask 077
+    private_key="$(wg genkey)"
+    public_key="$(printf '%s' "${private_key}" | wg pubkey)"
+    printf '%s\n' "${private_key}" >"${private_key_file}"
+    printf '%s\n' "${public_key}" >"${public_key_file}"
+    ensure_ip_forwarding
+
+    cat >"${config_file}" <<EOF
+[Interface]
+Address = ${subnet}.1/24
+ListenPort = ${listen_port}
+PrivateKey = ${private_key}
+SaveConfig = true
+PostUp = iptables -A FORWARD -i ${iface} -j ACCEPT; iptables -A FORWARD -o ${iface} -j ACCEPT; iptables -t nat -A POSTROUTING -s ${subnet}.0/24 -o ${outbound_iface} -j MASQUERADE
+PostDown = iptables -D FORWARD -i ${iface} -j ACCEPT; iptables -D FORWARD -o ${iface} -j ACCEPT; iptables -t nat -D POSTROUTING -s ${subnet}.0/24 -o ${outbound_iface} -j MASQUERADE
+EOF
+    chmod 600 "${config_file}" "${private_key_file}" "${public_key_file}"
+
+    echo "Enabling wg-quick@${iface}.service"
+    systemctl enable --now "wg-quick@${iface}"
+  fi
+
+  if [[ -z "${public_key:-}" ]]; then
+    echo "Unable to determine the WireGuard server public key for ${iface}."
+    exit 1
+  fi
+
+  write_env_value WG_SERVER_PUBLIC_KEY "${public_key}"
+
+  if is_placeholder_value "${endpoint}"; then
+    endpoint="$(get_primary_ip)"
+    if [[ -n "${endpoint}" ]]; then
+      write_env_value WG_SERVER_ENDPOINT "${endpoint}"
+      echo "WG_SERVER_ENDPOINT was not set. Using detected server IP ${endpoint}."
+    fi
+  fi
+
+  if [[ "${demo_mode,,}" == "false" ]]; then
+    echo "WireGuard bootstrap complete for production mode."
+  else
+    echo "WireGuard bootstrap complete. WireGate is still in test mode until DEMO_MODE is switched to false."
   fi
 }
 
@@ -199,13 +330,22 @@ EOF
 
 print_summary() {
   local server_ip
+  local iface
+  local endpoint
+  local public_key
   server_ip="$(hostname -I | awk '{print $1}')"
+  iface="$(read_env_value WG_INTERFACE)"
+  endpoint="$(read_env_value WG_SERVER_ENDPOINT)"
+  public_key="$(read_env_value WG_SERVER_PUBLIC_KEY)"
   echo
   echo "WireGate is installed."
   echo "Backend port: ${CHOSEN_PORT}"
   echo "Panel URL: http://${server_ip}:${CHOSEN_PORT}"
-  echo "Edit ${WIREGATE_DIR}/.env with your real WireGuard values."
-  echo "Set DEMO_MODE=false before production use."
+  echo "WireGuard interface: ${iface:-wg0}"
+  echo "WireGuard endpoint: ${endpoint:-not set}"
+  echo "WireGuard public key: ${public_key:-not set}"
+  echo "Private key is stored on the server in /etc/wireguard/${iface:-wg0}.conf and /etc/wireguard/${iface:-wg0}.key"
+  echo "Set DEMO_MODE=false before production use if you are still testing in demo mode."
 }
 
 print_banner
@@ -216,6 +356,7 @@ ensure_node
 sync_repo
 prepare_env
 choose_backend_port
+ensure_wireguard_bootstrap
 install_dependencies
 configure_sudoers
 configure_service

@@ -16,6 +16,7 @@ No cloud services. No subscriptions. Fully open source.
 - Settings page field for saving the WireGuard public IP or hostname into `.env`
 - Browser toggle for switching between test mode and production mode
 - One-click updater that pulls the newest GitHub version and rebuilds the app
+- One-click repair button that re-runs the full installer without deleting user data
 - Automatic WireGuard bootstrap that can generate the server keys and initial interface config on Ubuntu
 - Demo mode for testing without a real WireGuard server
 - One-command install script for Ubuntu
@@ -194,10 +195,13 @@ This is intended for local network administration only.
 From the Settings page, use the `Update from GitHub` button to:
 - check whether a newer GitHub version exists before doing anything
 - pull the newest repository version only when an update is available
+- rerun the full Ubuntu installer on the updated code so the server gets any newly added setup steps
 - reinstall backend and frontend dependencies
 - rebuild the frontend
 - restart the `wiregate` service
 - preserve the existing `.env` file and the saved user data in `backend/data/`
+
+If you want the GUI to repair the install even when GitHub has no newer version, use the `Repair / reinstall now` button. That button skips the version check and re-runs the full installer while still preserving `.env` and `backend/data/`.
 
 You can also run the updater manually on Ubuntu:
 

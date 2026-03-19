@@ -61,9 +61,10 @@ export const api = {
       body: JSON.stringify({ demo }),
     }),
   updateStatus: () => request('/api/system/update'),
-  startUpdate: () =>
+  startUpdate: (body = {}) =>
     request('/api/system/update', {
       method: 'POST',
+      body: JSON.stringify(body),
     }),
   systemCommands: () => request('/api/system/commands'),
   runSystemCommand: (commandId) =>

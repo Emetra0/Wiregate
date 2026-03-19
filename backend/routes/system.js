@@ -147,9 +147,9 @@ router.get('/update', (_req, res) => {
   }
 });
 
-router.post('/update', (_req, res) => {
+router.post('/update', (req, res) => {
   try {
-    return res.json(updateManager.startUpdate());
+    return res.json(updateManager.startUpdate({ forceInstall: Boolean(req.body?.forceInstall) }));
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
