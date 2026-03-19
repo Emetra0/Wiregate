@@ -720,6 +720,23 @@ img {
   min-height: 46px;
 }
 
+.terminal-page-card {
+  padding-bottom: 16px;
+}
+
+.vm-terminal-host {
+  min-height: 68vh;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #081019;
+  overflow: hidden;
+}
+
+.vm-terminal-host .xterm {
+  height: 68vh;
+  padding: 12px;
+}
+
 .copy-field {
   display: flex;
   flex-direction: column;

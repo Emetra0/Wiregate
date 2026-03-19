@@ -1,5 +1,12 @@
 const path = require('path');
-const { spawn } = require('child_process');
+
+let nodePty = null;
+
+try {
+  nodePty = require('node-pty');
+} catch {
+  nodePty = null;
+}
 
 const repoRoot = path.resolve(__dirname, '../..');
 const maxBufferLength = 120000;
@@ -10,19 +17,21 @@ let outputBuffer = '';
 const subscribers = new Set();
 
 function getShellDefinition() {
-  if (process.platform === 'win32') {
-    return {
-      command: 'powershell.exe',
-      args: ['-NoLogo'],
-      label: 'powershell',
-    };
+  return {
+    command: process.env.SHELL || '/bin/bash',
+    args: [],
+    label: 'ubuntu-vm-shell',
+  };
+}
+
+function ensurePtySupport() {
+  if (process.platform !== 'linux') {
+    throw new Error('The live VM terminal is only supported on the Ubuntu server.');
   }
 
-  return {
-    command: '/bin/bash',
-    args: [],
-    label: 'bash',
-  };
+  if (!nodePty) {
+    throw new Error('The live VM terminal requires node-pty. Re-run the installer on Ubuntu to install the terminal dependencies.');
+  }
 }
 
 function trimBuffer() {
@@ -46,47 +55,66 @@ function appendOutput(text) {
 }
 
 function ensureSession() {
-  if (shellProcess && !shellProcess.killed) {
+  if (shellProcess) {
     return shellProcess;
   }
+
+  ensurePtySupport();
 
   const shell = getShellDefinition();
   shellLabel = shell.label;
 
-  shellProcess = spawn(shell.command, shell.args, {
+  shellProcess = nodePty.spawn(shell.command, shell.args, {
     cwd: repoRoot,
+    cols: 120,
+    rows: 32,
+    name: 'xterm-256color',
     env: {
       ...process.env,
       TERM: process.env.TERM || 'xterm-256color',
     },
-    stdio: ['pipe', 'pipe', 'pipe'],
   });
 
-  appendOutput(`[wiregate terminal connected to ${shell.label} in ${repoRoot}]\n`);
+  appendOutput(`[wiregate terminal connected to ${shell.label} in ${repoRoot}]\r\n`);
 
-  shellProcess.stdout.on('data', (chunk) => appendOutput(chunk.toString()));
-  shellProcess.stderr.on('data', (chunk) => appendOutput(chunk.toString()));
-  shellProcess.on('error', (error) => {
-    appendOutput(`\n[terminal error] ${error.message}\n`);
-    emit('error', { error: error.message });
-  });
-  shellProcess.on('close', (code) => {
-    appendOutput(`\n[terminal exited with code ${code}]\n`);
+  shellProcess.onData((chunk) => appendOutput(chunk.toString()));
+  shellProcess.onExit(({ exitCode }) => {
+    appendOutput(`\r\n[terminal exited with code ${exitCode}]\r\n`);
     shellProcess = null;
-    emit('exit', { code });
+    emit('exit', { code: exitCode });
   });
 
   return shellProcess;
 }
 
+function handleError(error) {
+  appendOutput(`\r\n[terminal error] ${error.message}\r\n`);
+  emit('error', { error: error.message });
+}
+
 function getState() {
   ensureSession();
   return {
-    running: Boolean(shellProcess && !shellProcess.killed),
+    running: Boolean(shellProcess),
     shell: shellLabel,
     cwd: repoRoot,
     output: outputBuffer,
   };
+}
+
+function writeData(data) {
+  const input = `${data || ''}`;
+  if (!input) {
+    throw new Error('Terminal input is required.');
+  }
+
+  try {
+    ensureSession().write(input);
+    return { ok: true };
+  } catch (error) {
+    handleError(error);
+    throw error;
+  }
 }
 
 function writeInput(input) {
@@ -95,21 +123,34 @@ function writeInput(input) {
     throw new Error('Terminal input is required.');
   }
 
-  ensureSession();
-  appendOutput(`$ ${command}\n`);
-  shellProcess.stdin.write(`${command}\n`);
+  return writeData(`${command}\r`);
+}
 
-  return {
-    ok: true,
-    sent: command,
-  };
+function resize(cols, rows) {
+  const width = Number(cols);
+  const height = Number(rows);
+
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 20 || height < 5) {
+    return { ok: false };
+  }
+
+  try {
+    ensureSession().resize(Math.floor(width), Math.floor(height));
+    return { ok: true };
+  } catch (error) {
+    handleError(error);
+    throw error;
+  }
 }
 
 function interrupt() {
-  ensureSession();
-  shellProcess.stdin.write('\u0003');
-  appendOutput('^C\n');
-  return { ok: true };
+  try {
+    ensureSession().write('\u0003');
+    return { ok: true };
+  } catch (error) {
+    handleError(error);
+    throw error;
+  }
 }
 
 function clearOutput() {
@@ -130,7 +171,9 @@ function subscribe(listener) {
 
 module.exports = {
   getState,
+  writeData,
   writeInput,
+  resize,
   interrupt,
   clearOutput,
   subscribe,
