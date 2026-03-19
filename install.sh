@@ -43,6 +43,14 @@ ensure_base_packages() {
     packages+=(iptables)
   fi
 
+  if ! command -v make >/dev/null 2>&1; then
+    packages+=(build-essential)
+  fi
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    packages+=(python3)
+  fi
+
   if [[ "${#packages[@]}" -gt 0 ]]; then
     echo "Installing required base packages: ${packages[*]}"
     apt update
