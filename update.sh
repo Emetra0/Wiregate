@@ -76,9 +76,9 @@ fi
 
 echo "[$(ts)] Executing install.sh"
 if [[ "${EUID}" -eq 0 ]]; then
-  ./install.sh
+  SKIP_WIREGATE_RESTART=true ./install.sh
 else
-  sudo ./install.sh
+  sudo SKIP_WIREGATE_RESTART=true ./install.sh
 fi
 
 CURRENT_COMMIT="$(git rev-parse HEAD 2>/dev/null || true)"
@@ -87,3 +87,8 @@ UPDATE_AVAILABLE=false
 
 echo "[$(ts)] Installer update completed successfully"
 finish_success
+
+if command -v systemctl >/dev/null 2>&1; then
+  echo "[$(ts)] Restarting wiregate.service after successful update"
+  systemctl restart wiregate || true
+fi

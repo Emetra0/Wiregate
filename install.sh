@@ -324,7 +324,12 @@ EOF
 
   systemctl daemon-reload
   systemctl enable wiregate
-  systemctl restart wiregate
+
+  if [[ "${SKIP_WIREGATE_RESTART:-false}" == "true" ]]; then
+    echo "Skipping wiregate service restart because SKIP_WIREGATE_RESTART=true."
+  else
+    systemctl restart wiregate
+  fi
 }
 
 print_summary() {

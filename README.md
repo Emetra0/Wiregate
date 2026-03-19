@@ -201,6 +201,33 @@ cd wiregate
 sudo ./install.sh
 ```
 
+## Fresh uninstall and reinstall
+If you want to wipe the current WireGate install and start over, run:
+
+```bash
+cd wiregate
+chmod +x uninstall.sh
+sudo ./uninstall.sh
+sudo ./install.sh
+```
+
+What `uninstall.sh` removes:
+- `wiregate.service`
+- the WireGate sudoers rule
+- `.env`
+- `backend/data/`
+- backend and frontend `node_modules`
+- built frontend files in `frontend/dist`
+- the WireGuard interface config and key files for the configured interface by default
+
+If you want to keep the existing WireGuard interface files and only wipe WireGate itself:
+
+```bash
+cd wiregate
+sudo REMOVE_WIREGUARD=false ./uninstall.sh
+sudo ./install.sh
+```
+
 ## Security note
 WireGate should only be reachable on your local network or behind a VPN.
 Never expose port 3001 directly to the public internet.
