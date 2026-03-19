@@ -1,6 +1,7 @@
 const fs = require('fs');
 const { execSync } = require('child_process');
 const envStore = require('./env-store');
+const store = require('./store');
 
 function run(command) {
   return execSync(command, {
@@ -48,6 +49,64 @@ function updateConfigValue(content, key, value) {
   }
 
   return `${content.trimEnd()}\n${key} = ${value}\n`;
+}
+
+function escapeRegExp(value) {
+  return `${value}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function updateSubnetReferences(content, previousSubnet, nextSubnet, iface, outboundIface) {
+  let nextContent = content;
+
+  if (previousSubnet && previousSubnet !== nextSubnet) {
+    const oldAddressPattern = new RegExp(`Address\\s*=\\s*${escapeRegExp(previousSubnet)}\\.1/24`, 'm');
+    nextContent = nextContent.replace(oldAddressPattern, `Address = ${nextSubnet}.1/24`);
+
+    const oldCidrPattern = new RegExp(`${escapeRegExp(previousSubnet)}\\.0/24`, 'g');
+    nextContent = nextContent.replace(oldCidrPattern, `${nextSubnet}.0/24`);
+  }
+
+  nextContent = updateConfigValue(nextContent, 'Address', `${nextSubnet}.1/24`);
+
+  const postUp = `iptables -A FORWARD -i ${iface} -j ACCEPT; iptables -A FORWARD -o ${iface} -j ACCEPT; iptables -t nat -A POSTROUTING -s ${nextSubnet}.0/24 -o ${outboundIface} -j MASQUERADE`;
+  const postDown = `iptables -D FORWARD -i ${iface} -j ACCEPT; iptables -D FORWARD -o ${iface} -j ACCEPT; iptables -t nat -D POSTROUTING -s ${nextSubnet}.0/24 -o ${outboundIface} -j MASQUERADE`;
+  nextContent = updateConfigValue(nextContent, 'PostUp', postUp);
+  nextContent = updateConfigValue(nextContent, 'PostDown', postDown);
+
+  return nextContent;
+}
+
+function migrateUsersToSubnet(iface, previousSubnet, nextSubnet) {
+  if (!previousSubnet || previousSubnet === nextSubnet) {
+    return;
+  }
+
+  const users = store.getAll();
+
+  users.forEach((user) => {
+    const lastOctet = `${user.ip || ''}`.split('.').pop();
+    if (!lastOctet || !/^\d+$/.test(lastOctet)) {
+      return;
+    }
+
+    const nextIp = `${nextSubnet}.${lastOctet}`;
+    store.replace(user.publicKey, {
+      ...user,
+      ip: nextIp,
+    });
+
+    try {
+      run(`sudo wg set ${iface} peer ${user.publicKey} allowed-ips ${nextIp}/32`);
+    } catch {
+      // Ignore missing peers during migration; stored user IP is still updated.
+    }
+  });
+
+  try {
+    run(`sudo wg-quick save ${iface}`);
+  } catch {
+    // Ignore save failures here; the service restart will report problems visibly.
+  }
 }
 
 function ensureWireguardInstalled() {
@@ -142,7 +201,7 @@ function ensureWireguardBootstrap() {
   };
 }
 
-function applyWireguardServerConfig({ endpoint, port }) {
+function applyWireguardServerConfig({ endpoint, port, subnet }) {
   if (!isLinux()) {
     throw new Error('WireGuard server configuration can only be applied on Linux servers.');
   }
@@ -150,6 +209,7 @@ function applyWireguardServerConfig({ endpoint, port }) {
   const bootstrap = ensureWireguardBootstrap();
   const iface = bootstrap.interface;
   const configPath = `/etc/wireguard/${iface}.conf`;
+  const previousSubnet = process.env.WG_SUBNET || bootstrap.subnet;
   const nextValues = {};
 
   if (endpoint) {
@@ -159,21 +219,44 @@ function applyWireguardServerConfig({ endpoint, port }) {
   if (port) {
     const normalizedPort = `${port}`.trim();
     nextValues.WG_SERVER_PORT = normalizedPort;
+  }
 
-    if (fs.existsSync(configPath)) {
-      const updatedConfig = updateConfigValue(fs.readFileSync(configPath, 'utf8'), 'ListenPort', normalizedPort);
-      fs.writeFileSync(configPath, updatedConfig, { encoding: 'utf8', mode: 0o600 });
+  if (subnet) {
+    nextValues.WG_SUBNET = `${subnet}`.trim();
+  }
+
+  if (fs.existsSync(configPath)) {
+    let updatedConfig = fs.readFileSync(configPath, 'utf8');
+
+    if (port) {
+      updatedConfig = updateConfigValue(updatedConfig, 'ListenPort', `${port}`.trim());
     }
+
+    if (subnet) {
+      const outboundIface = getDefaultInterface();
+      if (!outboundIface) {
+        throw new Error('Unable to detect the default outbound interface.');
+      }
+
+      updatedConfig = updateSubnetReferences(updatedConfig, previousSubnet, `${subnet}`.trim(), iface, outboundIface);
+    }
+
+    fs.writeFileSync(configPath, updatedConfig, { encoding: 'utf8', mode: 0o600 });
   }
 
   if (Object.keys(nextValues).length > 0) {
     envStore.updateEnvValues(nextValues);
   }
 
+  if (subnet) {
+    migrateUsersToSubnet(iface, previousSubnet, `${subnet}`.trim());
+  }
+
   return {
     interface: iface,
     endpoint: process.env.WG_SERVER_ENDPOINT || bootstrap.endpoint,
     port: process.env.WG_SERVER_PORT || bootstrap.port,
+    subnet: process.env.WG_SUBNET || bootstrap.subnet,
     publicKey: process.env.WG_SERVER_PUBLIC_KEY || bootstrap.publicKey,
   };
 }

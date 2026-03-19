@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import Header from '../components/Header';
 import { useToast } from '../components/Toast';
@@ -11,11 +11,15 @@ export default function Settings({ onStatusChange }) {
   const [updateState, setUpdateState] = useState(null);
   const [commandState, setCommandState] = useState(null);
   const [terminalOutput, setTerminalOutput] = useState('Ready.');
+  const [webTerminalOutput, setWebTerminalOutput] = useState('Connecting to shell...');
+  const [webTerminalInput, setWebTerminalInput] = useState('');
+  const [webTerminalBusy, setWebTerminalBusy] = useState(false);
   const [busyAction, setBusyAction] = useState('');
   const [configBusy, setConfigBusy] = useState(false);
   const [commandBusy, setCommandBusy] = useState('');
   const [updateBusy, setUpdateBusy] = useState(false);
   const [repairBusy, setRepairBusy] = useState(false);
+  const webTerminalRef = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -41,6 +45,39 @@ export default function Settings({ onStatusChange }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const stopStream = api.streamSystemTerminal({
+      onSnapshot: (data) => {
+        setWebTerminalOutput(data.output || '');
+      },
+      onChunk: (chunk) => {
+        setWebTerminalOutput((current) => `${current}${chunk}`);
+      },
+      onClear: () => {
+        setWebTerminalOutput('');
+      },
+      onExit: () => {
+        setWebTerminalOutput((current) => `${current}\n[terminal disconnected]\n`);
+      },
+      onError: (error) => {
+        showToast(error.message, 'error');
+      },
+    });
+
+    return () => {
+      stopStream?.();
+    };
+  }, [showToast]);
+
+  useEffect(() => {
+    const panel = webTerminalRef.current;
+    if (!panel) {
+      return;
+    }
+
+    panel.scrollTop = panel.scrollHeight;
+  }, [webTerminalOutput]);
 
   const runTerminalAction = useCallback(
     async ({ action, commandText, successMessage, busyValue }) => {
@@ -140,11 +177,17 @@ export default function Settings({ onStatusChange }) {
       return;
     }
 
+    if (!config?.subnet?.trim()) {
+      showToast('WireGuard subnet is required', 'error');
+      return;
+    }
+
     setConfigBusy(true);
     try {
       const result = await api.saveSystemConfig({
         endpoint: config.endpoint.trim(),
         port: `${config.port}`.trim(),
+        subnet: config.subnet.trim(),
       });
       setConfig(result);
       showToast(result.message || 'Saved server network settings', 'success');
@@ -185,6 +228,45 @@ export default function Settings({ onStatusChange }) {
     }
   };
 
+  const handleWebTerminalSubmit = async () => {
+    const input = webTerminalInput.trim();
+    if (!input) {
+      return;
+    }
+
+    setWebTerminalBusy(true);
+    try {
+      setWebTerminalOutput((current) => `${current}${current.endsWith('\n') || !current ? '' : '\n'}$ ${input}\n`);
+      await api.sendSystemTerminalInput(input);
+      setWebTerminalInput('');
+    } catch (error) {
+      showToast(error.message, 'error');
+      setWebTerminalOutput((current) => `${current}\n[error] ${error.message}\n`);
+    } finally {
+      setWebTerminalBusy(false);
+    }
+  };
+
+  const handleWebTerminalInterrupt = async () => {
+    setWebTerminalBusy(true);
+    try {
+      await api.interruptSystemTerminal();
+    } catch (error) {
+      showToast(error.message, 'error');
+    } finally {
+      setWebTerminalBusy(false);
+    }
+  };
+
+  const handleWebTerminalClear = async () => {
+    try {
+      await api.clearSystemTerminal();
+      setWebTerminalOutput('');
+    } catch (error) {
+      showToast(error.message, 'error');
+    }
+  };
+
   return (
     <div className="page">
       <Header title="Settings" subtitle="Read-only server settings and WireGuard interface controls." />
@@ -211,6 +293,10 @@ export default function Settings({ onStatusChange }) {
             <div className="detail-item">
               <span className="meta-label">Current forwarded port</span>
               <strong>{config?.port || status?.listenPort || '--'}</strong>
+            </div>
+            <div className="detail-item">
+              <span className="meta-label">Current subnet</span>
+              <strong>{config?.subnet ? `${config.subnet}.0/24` : '--'}</strong>
             </div>
           </div>
         </div>
@@ -254,6 +340,24 @@ export default function Settings({ onStatusChange }) {
                 setConfig((current) => ({
                   ...(current || {}),
                   port: event.target.value,
+                }))
+              }
+            />
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="server-subnet">
+              WireGuard subnet prefix
+            </label>
+            <input
+              id="server-subnet"
+              className="input"
+              placeholder="10.0.0"
+              value={config?.subnet || ''}
+              onChange={(event) =>
+                setConfig((current) => ({
+                  ...(current || {}),
+                  subnet: event.target.value,
                 }))
               }
             />
@@ -323,6 +427,44 @@ export default function Settings({ onStatusChange }) {
           </div>
 
           <pre className="terminal">{terminalOutput}</pre>
+        </div>
+
+        <div className="card section-card">
+          <div className="section-head">
+            <div>
+              <h2>Web terminal</h2>
+              <p className="page-sub">Run commands directly from the website in the same server shell session.</p>
+            </div>
+            <span className="badge badge-online">Interactive shell</span>
+          </div>
+
+          <pre ref={webTerminalRef} className="terminal web-terminal-output">{webTerminalOutput || ' '}</pre>
+
+          <div className="web-terminal-controls">
+            <input
+              className="input web-terminal-input mono-text"
+              placeholder="Type a command and press Enter"
+              value={webTerminalInput}
+              onChange={(event) => setWebTerminalInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  handleWebTerminalSubmit();
+                }
+              }}
+            />
+            <div className="button-row">
+              <button className="btn btn-primary" type="button" onClick={handleWebTerminalSubmit} disabled={webTerminalBusy}>
+                Send
+              </button>
+              <button className="btn btn-amber" type="button" onClick={handleWebTerminalInterrupt} disabled={webTerminalBusy}>
+                Ctrl+C
+              </button>
+              <button className="btn btn-ghost" type="button" onClick={handleWebTerminalClear}>
+                Clear
+              </button>
+            </div>
+          </div>
         </div>
 
         <div className="card section-card">

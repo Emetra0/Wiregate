@@ -2,6 +2,7 @@ const express = require('express');
 const os = require('os');
 const commandRunner = require('../lib/command-runner');
 const envStore = require('../lib/env-store');
+const terminalManager = require('../lib/terminal-manager');
 const updateManager = require('../lib/update-manager');
 const { ensureWireguardBootstrap, applyWireguardServerConfig } = require('../lib/wg-bootstrap');
 
@@ -82,6 +83,58 @@ router.post('/commands/:commandId', (req, res) => {
   }
 });
 
+router.get('/terminal', (_req, res) => {
+  try {
+    return res.json(terminalManager.getState());
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/terminal/stream', (req, res) => {
+  try {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    const unsubscribe = terminalManager.subscribe((event, payload) => {
+      res.write(`event: ${event}\n`);
+      res.write(`data: ${JSON.stringify(payload)}\n\n`);
+    });
+
+    req.on('close', () => {
+      unsubscribe();
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/terminal/input', (req, res) => {
+  try {
+    return res.json(terminalManager.writeInput(req.body?.input));
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/terminal/interrupt', (_req, res) => {
+  try {
+    return res.json(terminalManager.interrupt());
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/terminal/clear', (_req, res) => {
+  try {
+    return res.json(terminalManager.clearOutput());
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 router.get('/mode', (_req, res) => {
   try {
     return res.json(getModeState());
@@ -134,6 +187,7 @@ router.post('/config', (req, res) => {
   try {
     const endpoint = `${req.body?.endpoint || ''}`.trim();
     const port = `${req.body?.port || ''}`.trim();
+    const subnet = `${req.body?.subnet || ''}`.trim();
 
     if (!endpoint) {
       return res.status(400).json({ error: 'Public IP or hostname is required.' });
@@ -143,13 +197,18 @@ router.post('/config', (req, res) => {
       return res.status(400).json({ error: 'A valid forwarded WireGuard port is required.' });
     }
 
-    const applied = applyWireguardServerConfig({ endpoint, port });
+    if (!subnet || !/^(25[0-5]|2[0-4]\d|1?\d?\d)\.(25[0-5]|2[0-4]\d|1?\d?\d)\.(25[0-5]|2[0-4]\d|1?\d?\d)$/.test(subnet)) {
+      return res.status(400).json({ error: 'A valid subnet prefix is required, for example 10.0.0.' });
+    }
+
+    const applied = applyWireguardServerConfig({ endpoint, port, subnet });
 
     return res.json({
       ...getSystemConfig(),
       interface: applied.interface,
+      subnet: applied.subnet,
       publicKey: applied.publicKey,
-      message: 'Saved and applied the WireGuard public endpoint and listen port.',
+      message: 'Saved and applied the WireGuard endpoint, port, and subnet.',
     });
   } catch (error) {
     return res.status(500).json({ error: error.message });
