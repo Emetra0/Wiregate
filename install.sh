@@ -28,6 +28,24 @@ ensure_wireguard() {
   fi
 }
 
+ensure_base_packages() {
+  local packages=()
+
+  if ! command -v git >/dev/null 2>&1; then
+    packages+=(git)
+  fi
+
+  if ! command -v ss >/dev/null 2>&1; then
+    packages+=(iproute2)
+  fi
+
+  if [[ "${#packages[@]}" -gt 0 ]]; then
+    echo "Installing required base packages: ${packages[*]}"
+    apt update
+    apt install -y "${packages[@]}"
+  fi
+}
+
 ensure_node() {
   if command -v node >/dev/null 2>&1; then
     NODE_MAJOR="$(node -v | sed 's/v\([0-9]*\).*/\1/')"
@@ -192,6 +210,7 @@ print_summary() {
 
 print_banner
 require_root
+ensure_base_packages
 ensure_wireguard
 ensure_node
 sync_repo

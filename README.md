@@ -29,6 +29,53 @@ chmod +x install.sh
 sudo ./install.sh
 ```
 
+## Ubuntu installation plan
+WireGate depends on a small set of packages and services on the server. The installer handles these automatically where possible.
+
+### Packages the installer checks or installs
+- `wireguard` — required for `wg` and `wg-quick`
+- `nodejs` 18+ — required to run the backend and build the frontend
+- `git` — required when pulling or cloning the repository on the server
+- `iproute2` — provides `ss`, used by the installer for automatic port conflict checks
+- `curl`, `ca-certificates`, `gnupg` — used when installing Node.js from NodeSource
+
+### Services used by WireGate
+- `wiregate.service` — the browser admin panel backend, installed and enabled by `install.sh`
+- `wg-quick@wg0.service` — optional but recommended if you want the WireGuard interface itself to come up automatically on boot
+
+### Recommended Ubuntu setup order
+1. Install Ubuntu 22.04 or later.
+2. Make sure your WireGuard server config already exists, usually at `/etc/wireguard/wg0.conf`.
+3. Clone this repository to the server.
+4. Run `sudo ./install.sh`.
+5. Edit `.env` with real server values and set `DEMO_MODE=false`.
+6. Restart WireGate with `sudo systemctl restart wiregate`.
+7. If you want the VPN interface to start on boot, run `sudo systemctl enable --now wg-quick@wg0`.
+
+### What the installer does
+1. Confirms it is running as root.
+2. Installs required base packages if missing.
+3. Installs WireGuard if missing.
+4. Installs Node.js 18+ if missing.
+5. Copies `.env.example` to `.env` when needed.
+6. Checks whether the default backend port is already in use.
+7. Chooses the next free backend port automatically if needed and writes it to `.env`.
+8. Runs `npm install` in both `backend/` and `frontend/`.
+9. Builds the frontend for production.
+10. Creates and enables the `wiregate` systemd service.
+11. Writes the sudoers rule required for `wg` and `wg-quick`.
+12. Prints the final URL using the chosen backend port.
+
+### Recommended post-install checks
+```bash
+sudo systemctl status wiregate
+sudo journalctl -u wiregate -n 100 --no-pager
+sudo systemctl status wg-quick@wg0
+ss -ltnp | grep 3001
+```
+
+If the installer selected a different port because `3001` was in use, check the value in `.env` and use that port instead.
+
 ## Manual setup
 1. Clone the repository.
 2. Run `npm install` inside `backend/`.
@@ -89,6 +136,7 @@ chmod +x install.sh
 sudo ./install.sh
 sudo nano .env
 sudo systemctl restart wiregate
+sudo systemctl enable --now wg-quick@wg0
 ```
 
 ## Sudoers rule required on Ubuntu
