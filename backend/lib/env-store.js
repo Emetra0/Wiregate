@@ -36,6 +36,25 @@ function readEnvLines() {
   return fs.readFileSync(envPath, 'utf8').split(/\r?\n/);
 }
 
+function readEnvValues() {
+  const lines = readEnvLines();
+  return lines.reduce((acc, line) => {
+    if (!line || line.trim().startsWith('#') || !line.includes('=')) {
+      return acc;
+    }
+
+    const separatorIndex = line.indexOf('=');
+    const key = line.slice(0, separatorIndex).trim();
+    const value = line.slice(separatorIndex + 1).trim();
+
+    if (key) {
+      acc[key] = value;
+    }
+
+    return acc;
+  }, {});
+}
+
 function updateEnvValues(entries) {
   const envPath = ensureEnvFile();
   const lines = readEnvLines();
@@ -69,6 +88,7 @@ function currentMode() {
 
 module.exports = {
   getEnvFilePath,
+  readEnvValues,
   updateEnvValues,
   currentMode,
 };

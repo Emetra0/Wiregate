@@ -13,8 +13,10 @@ No cloud services. No subscriptions. Fully open source.
 - Live dashboard showing connected users and server stats
 - Start, stop and restart WireGuard from the browser
 - Live terminal output for WireGuard start, stop, and restart actions
+- Settings page field for saving the WireGuard public IP or hostname into `.env`
 - Browser toggle for switching between test mode and production mode
 - One-click updater that pulls the newest GitHub version and rebuilds the app
+- Automatic WireGuard bootstrap that can generate the server keys and initial interface config on Ubuntu
 - Demo mode for testing without a real WireGuard server
 - One-command install script for Ubuntu
 
@@ -40,7 +42,7 @@ WireGate depends on a small set of packages and services on the server. The inst
 ### Repo requirements for Ubuntu
 Before WireGate can manage a real VPN server, the host needs:
 - Ubuntu 22.04 or later
-- a WireGuard server config file, usually `/etc/wireguard/wg0.conf`
+- either an existing WireGuard server config file, usually `/etc/wireguard/wg0.conf`, or `AUTO_SETUP_WIREGUARD=true` so the installer can create one
 - the `wireguard` package installed
 - Node.js 18 or newer
 - `systemd` available for the `wiregate` service and optional `wg-quick@wg0` service
@@ -56,6 +58,18 @@ Before WireGate can manage a real VPN server, the host needs:
 ### Services used by WireGate
 - `wiregate.service` — the browser admin panel backend, installed and enabled by `install.sh`
 - `wg-quick@wg0.service` — optional but recommended if you want the WireGuard interface itself to come up automatically on boot
+
+### Automatic WireGuard bootstrap
+If `AUTO_SETUP_WIREGUARD=true` and `/etc/wireguard/<interface>.conf` does not already exist, the installer will:
+- generate a new WireGuard server private key and public key
+- store the private key on the server under `/etc/wireguard/<interface>.key`
+- create `/etc/wireguard/<interface>.conf`
+- enable IP forwarding
+- add a simple NAT rule using the detected default outbound interface
+- enable and start `wg-quick@<interface>`
+- write the generated public key into `.env` as `WG_SERVER_PUBLIC_KEY`
+
+If `WG_SERVER_ENDPOINT` is still a placeholder, the installer fills it with the server's detected primary IP address. For internet-facing VPN access, replace that with your real public IP or DNS name afterward.
 
 ### Install Node.js manually on Ubuntu
 If you want to install Node.js yourself before running WireGate, use:
@@ -104,6 +118,8 @@ sudo wg show
 
 After that, set the matching values in `.env`, especially `WG_INTERFACE`, `WG_SERVER_PORT`, `WG_SERVER_PUBLIC_KEY`, `WG_SERVER_ENDPOINT`, and `DEMO_MODE=false`.
 
+If you do not want to create the WireGuard server manually, keep `AUTO_SETUP_WIREGUARD=true` and let `install.sh` generate the initial keys and interface config for you.
+
 ### Recommended Ubuntu setup order
 1. Install Ubuntu 22.04 or later.
 2. Make sure your WireGuard server config already exists, usually at `/etc/wireguard/wg0.conf`.
@@ -121,11 +137,12 @@ After that, set the matching values in `.env`, especially `WG_INTERFACE`, `WG_SE
 5. Copies `.env.example` to `.env` when needed.
 6. Checks whether the default backend port is already in use.
 7. Chooses the next free backend port automatically if needed and writes it to `.env`.
-8. Runs `npm install` in both `backend/` and `frontend/`.
-9. Builds the frontend for production.
-10. Creates and enables the `wiregate` systemd service.
-11. Writes the sudoers rule required for `wg` and `wg-quick`.
-12. Prints the final URL using the chosen backend port.
+8. Optionally bootstraps a WireGuard server config, generates keys, and syncs the public key into `.env`.
+9. Runs `npm install` in both `backend/` and `frontend/`.
+10. Builds the frontend for production.
+11. Creates and enables the `wiregate` systemd service.
+12. Writes the sudoers rule required for `wg` and `wg-quick`.
+13. Prints the final URL using the chosen backend port.
 
 ### Recommended post-install checks
 ```bash
@@ -160,6 +177,7 @@ If the installer selected a different port because `3001` was in use, check the 
 | `WG_DNS` | DNS server pushed to clients |
 | `DEMO_MODE` | When `true`, skips real WireGuard commands and returns safe demo data |
 | `ENABLE_COMMAND_CENTER` | When `true`, enables safe preset admin commands from the Settings page |
+| `AUTO_SETUP_WIREGUARD` | When `true`, `install.sh` generates a WireGuard server config and keys if the interface does not already exist |
 
 ## Demo mode
 Set `DEMO_MODE=true` to run WireGate on any OS without WireGuard installed.

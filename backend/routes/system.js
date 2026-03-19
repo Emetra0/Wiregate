@@ -22,6 +22,17 @@ function hasProductionValues() {
   return required.every((value) => value && !`${value}`.includes('YOUR_'));
 }
 
+function getSystemConfig() {
+  const env = envStore.readEnvValues();
+  return {
+    endpoint: env.WG_SERVER_ENDPOINT || process.env.WG_SERVER_ENDPOINT || '',
+    interface: env.WG_INTERFACE || process.env.WG_INTERFACE || 'wg0',
+    port: env.WG_SERVER_PORT || process.env.WG_SERVER_PORT || '51820',
+    subnet: env.WG_SUBNET || process.env.WG_SUBNET || '10.0.0',
+    dns: env.WG_DNS || process.env.WG_DNS || '1.1.1.1',
+  };
+}
+
 router.get('/', (_req, res) => {
   try {
     if (isDemoMode()) {
@@ -95,6 +106,33 @@ router.post('/mode', (req, res) => {
       ...envStore.currentMode(),
       canSwitchToProduction: hasProductionValues(),
       message: requestedDemo ? 'Switched to test mode.' : 'Switched to production mode.',
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/config', (_req, res) => {
+  try {
+    return res.json(getSystemConfig());
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/config', (req, res) => {
+  try {
+    const endpoint = `${req.body?.endpoint || ''}`.trim();
+
+    if (!endpoint) {
+      return res.status(400).json({ error: 'Public IP or hostname is required.' });
+    }
+
+    envStore.updateEnvValues({ WG_SERVER_ENDPOINT: endpoint });
+
+    return res.json({
+      ...getSystemConfig(),
+      message: 'Saved WireGuard public endpoint to .env.',
     });
   } catch (error) {
     return res.status(500).json({ error: error.message });

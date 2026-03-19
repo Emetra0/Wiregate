@@ -48,6 +48,12 @@ export const api = {
       method: 'POST',
     }),
   system: () => request('/api/system'),
+  systemConfig: () => request('/api/system/config'),
+  saveSystemConfig: (body) =>
+    request('/api/system/config', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   systemMode: () => request('/api/system/mode'),
   setSystemMode: (demo) =>
     request('/api/system/mode', {

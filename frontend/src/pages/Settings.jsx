@@ -8,27 +8,31 @@ export default function Settings({ onStatusChange }) {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState(null);
   const [mode, setMode] = useState(null);
+  const [config, setConfig] = useState(null);
   const [updateState, setUpdateState] = useState(null);
   const [commandState, setCommandState] = useState(null);
   const [terminalOutput, setTerminalOutput] = useState('Ready.');
   const [busyAction, setBusyAction] = useState('');
   const [busyMode, setBusyMode] = useState(false);
+  const [configBusy, setConfigBusy] = useState(false);
   const [commandBusy, setCommandBusy] = useState('');
   const [updateBusy, setUpdateBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [nextStatus, nextMode, nextCommands, nextUpdateState] = await Promise.all([
+      const [nextStatus, nextMode, nextCommands, nextUpdateState, nextConfig] = await Promise.all([
         api.wgStatus(),
         api.systemMode(),
         api.systemCommands(),
         api.updateStatus(),
+        api.systemConfig(),
       ]);
       setStatus(nextStatus);
       setMode(nextMode);
       setCommandState(nextCommands);
       setUpdateState(nextUpdateState);
+      setConfig(nextConfig);
       onStatusChange?.(nextStatus);
     } catch (error) {
       showToast(error.message, 'error');
@@ -124,6 +128,25 @@ export default function Settings({ onStatusChange }) {
     }
   };
 
+  const handleSaveEndpoint = async () => {
+    if (!config?.endpoint?.trim()) {
+      showToast('Public IP or hostname is required', 'error');
+      return;
+    }
+
+    setConfigBusy(true);
+    try {
+      const result = await api.saveSystemConfig({ endpoint: config.endpoint.trim() });
+      setConfig(result);
+      showToast(result.message || 'Saved public endpoint', 'success');
+      await load();
+    } catch (error) {
+      showToast(error.message, 'error');
+    } finally {
+      setConfigBusy(false);
+    }
+  };
+
   const handleStartUpdate = async () => {
     setUpdateBusy(true);
     try {
@@ -187,6 +210,39 @@ export default function Settings({ onStatusChange }) {
               disabled={busyMode || (!mode?.demo && false) || (mode?.demo && !mode?.canSwitchToProduction)}
             >
               {busyMode ? 'Switching…' : mode?.demo ? 'Switch to production mode' : 'Switch to test mode'}
+            </button>
+          </div>
+        </div>
+
+        <div className="card section-card">
+          <div className="section-head">
+            <div>
+              <h2>Server endpoint</h2>
+              <p className="page-sub">Set the public IP or hostname that gets written to `WG_SERVER_ENDPOINT` in `.env`.</p>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label" htmlFor="server-endpoint">
+              Public IP or hostname
+            </label>
+            <input
+              id="server-endpoint"
+              className="input"
+              placeholder="203.0.113.10 or vpn.example.com"
+              value={config?.endpoint || ''}
+              onChange={(event) =>
+                setConfig((current) => ({
+                  ...(current || {}),
+                  endpoint: event.target.value,
+                }))
+              }
+            />
+          </div>
+
+          <div className="button-row">
+            <button className="btn btn-primary" type="button" onClick={handleSaveEndpoint} disabled={configBusy}>
+              {configBusy ? 'Saving…' : 'Save public endpoint'}
             </button>
           </div>
         </div>
