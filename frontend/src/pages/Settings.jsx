@@ -42,6 +42,33 @@ export default function Settings({ onStatusChange }) {
     load();
   }, [load]);
 
+  const runTerminalAction = useCallback(
+    async ({ action, commandText, successMessage, busyValue }) => {
+      setBusyAction(busyValue);
+      setTerminalOutput(`${commandText}\n`);
+      try {
+        await new Promise((resolve, reject) => {
+          api.streamWireguardAction(action, {
+            onChunk: (chunk) => {
+              setTerminalOutput((current) => `${current}${chunk}`);
+            },
+            onEnd: resolve,
+            onError: reject,
+          });
+        });
+
+        showToast(successMessage, 'success');
+        await load();
+      } catch (error) {
+        setTerminalOutput((current) => `${current}\n[error] ${error.message}`);
+        showToast(error.message, 'error');
+      } finally {
+        setBusyAction('');
+      }
+    },
+    [load, showToast]
+  );
+
   useEffect(() => {
     if (!updateState?.running) {
       return undefined;
@@ -69,27 +96,22 @@ export default function Settings({ onStatusChange }) {
   };
 
   const handleControl = async (action) => {
-    setBusyAction(action);
-    setTerminalOutput(`$ wg-quick ${action.toLowerCase() === 'restart' ? 'down/up' : action.toLowerCase()} ${status?.interface || 'wg0'}\n`);
-    try {
-      await new Promise((resolve, reject) => {
-        api.streamWireguardAction(action, {
-          onChunk: (chunk) => {
-            setTerminalOutput((current) => `${current}${chunk}`);
-          },
-          onEnd: resolve,
-          onError: reject,
-        });
-      });
+    const normalized = action.toLowerCase();
+    return runTerminalAction({
+      action,
+      commandText: `$ wg-quick ${normalized === 'restart' ? 'down/up' : normalized} ${status?.interface || 'wg0'}`,
+      successMessage: `WireGuard ${normalized} complete`,
+      busyValue: action,
+    });
+  };
 
-      showToast(`WireGuard ${action.toLowerCase()} complete`, 'success');
-      await load();
-    } catch (error) {
-      setTerminalOutput((current) => `${current}\n[error] ${error.message}`);
-      showToast(error.message, 'error');
-    } finally {
-      setBusyAction('');
-    }
+  const handleServiceRestart = async () => {
+    return runTerminalAction({
+      action: 'service-restart',
+      commandText: `$ systemctl restart wg-quick@${status?.interface || 'wg0'} ; systemctl status wg-quick@${status?.interface || 'wg0'} --no-pager`,
+      successMessage: 'WireGuard service restart complete',
+      busyValue: 'service-restart',
+    });
   };
 
   const handlePresetCommand = async (commandId) => {
@@ -127,6 +149,12 @@ export default function Settings({ onStatusChange }) {
       setConfig(result);
       showToast(result.message || 'Saved server network settings', 'success');
       await load();
+      await runTerminalAction({
+        action: 'service-restart',
+        commandText: `$ systemctl restart wg-quick@${result.interface || status?.interface || 'wg0'} ; systemctl status wg-quick@${result.interface || status?.interface || 'wg0'} --no-pager`,
+        successMessage: 'WireGuard server restarted with the updated settings',
+        busyValue: 'service-restart',
+      });
     } catch (error) {
       showToast(error.message, 'error');
     } finally {
@@ -288,6 +316,9 @@ export default function Settings({ onStatusChange }) {
             </button>
             <button className="btn btn-amber" type="button" disabled={!!busyAction} onClick={() => handleControl('Restart')}>
               Restart
+            </button>
+            <button className="btn btn-primary" type="button" disabled={!!busyAction} onClick={handleServiceRestart}>
+              Restart service
             </button>
           </div>
 

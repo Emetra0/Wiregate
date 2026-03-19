@@ -171,6 +171,16 @@ function restartInterface() {
 function streamInterfaceAction(action, handlers = {}) {
   const iface = getInterfaceName();
 
+  if (action === 'service-restart') {
+    return streamSequence(
+      [
+        (stepHandlers) => spawnCommand('sudo', ['systemctl', 'restart', `wg-quick@${iface}`], stepHandlers),
+        (stepHandlers) => spawnCommand('sudo', ['systemctl', 'status', `wg-quick@${iface}`, '--no-pager'], stepHandlers),
+      ],
+      handlers
+    );
+  }
+
   if (action === 'restart') {
     return streamSequence(
       [

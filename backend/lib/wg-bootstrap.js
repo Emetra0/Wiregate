@@ -170,10 +170,6 @@ function applyWireguardServerConfig({ endpoint, port }) {
     envStore.updateEnvValues(nextValues);
   }
 
-  if (port) {
-    run(`systemctl restart wg-quick@${iface}`);
-  }
-
   return {
     interface: iface,
     endpoint: process.env.WG_SERVER_ENDPOINT || bootstrap.endpoint,
