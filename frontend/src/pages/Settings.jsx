@@ -533,7 +533,7 @@ export default function Settings({ onStatusChange }) {
               <span className="meta-label">Latest change</span>
               <strong>{systemInfo?.app?.latestChange || '--'}</strong>
             </div>
-            <a className="resource-link" href="https://github.com" target="_blank" rel="noreferrer">
+            <a className="resource-link" href="https://github.com/Slimetopian/Wiregate" target="_blank" rel="noreferrer">
               GitHub repository
             </a>
             <a className="resource-link" href="https://www.wireguard.com" target="_blank" rel="noreferrer">

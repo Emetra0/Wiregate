@@ -31,7 +31,7 @@ No cloud services. No subscriptions. Fully open source.
 This is the fastest path on a fresh Ubuntu server. The installer checks and installs the required repo dependencies, including Node.js 18+, WireGuard, `git`, and `iproute2` when they are missing.
 
 ```bash
-git clone https://github.com/Slimetopian/wiregate.git
+git clone https://github.com/Slimetopian/Wiregate.git
 cd wiregate
 chmod +x install.sh
 sudo ./install.sh
@@ -255,7 +255,7 @@ npm run dev
 ## Running on a real Ubuntu server
 ```bash
 ssh user@your-server-ip
-git clone https://github.com/Slimetopian/wiregate.git
+git clone https://github.com/Slimetopian/Wiregate.git
 cd wiregate
 chmod +x install.sh
 sudo ./install.sh

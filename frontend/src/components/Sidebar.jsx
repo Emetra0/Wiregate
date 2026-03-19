@@ -38,7 +38,7 @@ export default function Sidebar({ wgOnline, appVersion }) {
 
       <div className="sidebar-footer">
         <div>{appVersion || 'v1.0.0'}</div>
-        <a href="https://github.com" target="_blank" rel="noreferrer">
+        <a href="https://github.com/Slimetopian/Wiregate" target="_blank" rel="noreferrer">
           GitHub
         </a>
       </div>
