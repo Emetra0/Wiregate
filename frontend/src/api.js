@@ -54,6 +54,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  updateStatus: () => request('/api/system/update'),
+  startUpdate: (body = {}) =>
+    request('/api/system/update', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   systemTerminal: () => request('/api/system/terminal'),
   streamWireguardAction(action, handlers = {}) {
     const source = new EventSource(`/api/wireguard/stream/${encodeURIComponent(action.toLowerCase())}`);

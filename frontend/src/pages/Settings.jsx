@@ -10,17 +10,25 @@ export default function Settings({ onStatusChange }) {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState(null);
   const [config, setConfig] = useState(null);
+  const [updateState, setUpdateState] = useState(null);
   const [busyAction, setBusyAction] = useState('');
   const [configBusy, setConfigBusy] = useState(false);
   const [shortcutBusy, setShortcutBusy] = useState('');
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [repairBusy, setRepairBusy] = useState(false);
   const terminalRef = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [nextStatus, nextConfig] = await Promise.all([api.wgStatus(), api.systemConfig()]);
+      const [nextStatus, nextConfig, nextUpdateState] = await Promise.all([
+        api.wgStatus(),
+        api.systemConfig(),
+        api.updateStatus(),
+      ]);
       setStatus(nextStatus);
       setConfig(nextConfig);
+      setUpdateState(nextUpdateState);
       onStatusChange?.(nextStatus);
     } catch (error) {
       showToast(error.message, 'error');
@@ -32,6 +40,23 @@ export default function Settings({ onStatusChange }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    if (!updateState?.running) {
+      return undefined;
+    }
+
+    const interval = window.setInterval(async () => {
+      try {
+        const nextUpdateState = await api.updateStatus();
+        setUpdateState(nextUpdateState);
+      } catch (error) {
+        showToast(error.message, 'error');
+      }
+    }, 3000);
+
+    return () => window.clearInterval(interval);
+  }, [showToast, updateState?.running]);
 
   const runTerminalAction = useCallback(
     async ({ commandText, successMessage, busyValue }) => {
@@ -167,6 +192,29 @@ export default function Settings({ onStatusChange }) {
     ],
     [status?.interface]
   );
+
+  const handleStartUpdate = async (forceInstall = false) => {
+    if (forceInstall) {
+      setRepairBusy(true);
+    } else {
+      setUpdateBusy(true);
+    }
+
+    try {
+      const result = await api.startUpdate({ forceInstall });
+      showToast(result.message || 'Update started', 'success');
+      const nextUpdateState = await api.updateStatus();
+      setUpdateState(nextUpdateState);
+    } catch (error) {
+      showToast(error.message, 'error');
+    } finally {
+      if (forceInstall) {
+        setRepairBusy(false);
+      } else {
+        setUpdateBusy(false);
+      }
+    }
+  };
 
   return (
     <div className="page">
@@ -308,7 +356,7 @@ export default function Settings({ onStatusChange }) {
           <div className="section-head">
             <div>
               <h2>WireGuard interface controls</h2>
-              <p className="page-sub">Start or restart the active interface with live terminal output.</p>
+              <p className="page-sub">Start or restart the active interface. Output appears in the live terminal below.</p>
             </div>
           </div>
 
@@ -323,8 +371,6 @@ export default function Settings({ onStatusChange }) {
               Restart service
             </button>
           </div>
-
-          <ServerTerminal ref={terminalRef} height="34vh" />
         </div>
 
         <div className="card section-card">
@@ -377,12 +423,54 @@ export default function Settings({ onStatusChange }) {
           <div className="section-head">
             <div>
               <h2>Live server terminal</h2>
-              <p className="page-sub">This is the real Ubuntu shell. All shortcuts above send commands into this session.</p>
+              <p className="page-sub">This is the real Ubuntu shell. All controls and shortcuts above send commands into this session.</p>
             </div>
             <span className="badge badge-online">PTY shell</span>
           </div>
 
-          <ServerTerminal ref={terminalRef} height="38vh" />
+          <ServerTerminal ref={terminalRef} height="42vh" />
+        </div>
+
+        <div className="card section-card">
+          <div className="section-head">
+            <div>
+              <h2>Update WireGate</h2>
+              <p className="page-sub">Run the installer-based updater in the background and follow its real log output here.</p>
+            </div>
+            <span className={`badge ${updateState?.running ? 'badge-online' : 'badge-offline'}`}>
+              {updateState?.running ? 'Updating' : updateState?.status || 'Idle'}
+            </span>
+          </div>
+
+          <div className="button-row">
+            <button className="btn btn-primary" type="button" onClick={() => handleStartUpdate(false)} disabled={updateBusy || repairBusy || updateState?.running}>
+              {updateBusy || updateState?.running ? 'Installer running…' : 'Run installer update'}
+            </button>
+            <button className="btn btn-amber" type="button" onClick={() => handleStartUpdate(true)} disabled={updateBusy || repairBusy || updateState?.running}>
+              {repairBusy || updateState?.running ? 'Repair running…' : 'Run installer repair'}
+            </button>
+          </div>
+
+          <div className="update-meta-grid">
+            <div className="detail-item">
+              <span className="meta-label">Branch</span>
+              <strong>{updateState?.branch || '--'}</strong>
+            </div>
+            <div className="detail-item">
+              <span className="meta-label">Current commit</span>
+              <strong className="mono-text">{updateState?.currentCommit?.slice(0, 12) || '--'}</strong>
+            </div>
+            <div className="detail-item">
+              <span className="meta-label">Remote commit</span>
+              <strong className="mono-text">{updateState?.remoteCommit?.slice(0, 12) || '--'}</strong>
+            </div>
+            <div className="detail-item detail-span">
+              <span className="meta-label">Latest message</span>
+              <strong>{updateState?.message || 'No update started yet.'}</strong>
+            </div>
+          </div>
+
+          <pre className="terminal update-terminal">{updateState?.log || 'No update log yet.'}</pre>
         </div>
 
         <div className="card section-card">

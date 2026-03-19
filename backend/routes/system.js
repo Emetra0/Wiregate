@@ -2,6 +2,7 @@ const express = require('express');
 const os = require('os');
 const envStore = require('../lib/env-store');
 const terminalManager = require('../lib/terminal-manager');
+const updateManager = require('../lib/update-manager');
 const { ensureWireguardBootstrap, applyWireguardServerConfig } = require('../lib/wg-bootstrap');
 
 const router = express.Router();
@@ -148,6 +149,22 @@ router.post('/config', (req, res) => {
       publicKey: applied.publicKey,
       message: 'Saved and applied the WireGuard endpoint, port, and subnet.',
     });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/update', (_req, res) => {
+  try {
+    return res.json(updateManager.getStatus());
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/update', (req, res) => {
+  try {
+    return res.json(updateManager.startUpdate({ forceInstall: Boolean(req.body?.forceInstall) }));
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
