@@ -4,6 +4,7 @@ import { api } from './api';
 import Sidebar from './components/Sidebar';
 import { ToastContainer, ToastProvider, useToast } from './components/Toast';
 import Dashboard from './pages/Dashboard';
+import NetworkPage from './pages/Network';
 import Settings from './pages/Settings';
 import TerminalPage from './pages/Terminal';
 import Users from './pages/Users';
@@ -36,6 +37,7 @@ function AppShell() {
         <main className="main-content">
           <Routes>
             <Route path="/" element={<Dashboard onStatusChange={setWgStatus} />} />
+            <Route path="/network" element={<NetworkPage />} />
             <Route path="/users" element={<Users />} />
             <Route path="/terminal" element={<TerminalPage />} />
             <Route path="/settings" element={<Settings onStatusChange={setWgStatus} />} />

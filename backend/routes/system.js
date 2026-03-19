@@ -4,7 +4,13 @@ const { getAppMeta } = require('../lib/app-meta');
 const envStore = require('../lib/env-store');
 const terminalManager = require('../lib/terminal-manager');
 const updateManager = require('../lib/update-manager');
-const { ensureWireguardBootstrap, applyWireguardServerConfig } = require('../lib/wg-bootstrap');
+const {
+  ensureWireguardBootstrap,
+  applyWireguardServerConfig,
+  detectPublicIp,
+  getLocalServerIp,
+  isFirewallPortOpen,
+} = require('../lib/wg-bootstrap');
 
 const router = express.Router();
 
@@ -49,6 +55,25 @@ function getSystemConfig() {
     port: env.WG_SERVER_PORT || process.env.WG_SERVER_PORT || '51820',
     subnet: env.WG_SUBNET || process.env.WG_SUBNET || '10.0.0',
     dns: env.WG_DNS || process.env.WG_DNS || '1.1.1.1',
+  };
+}
+
+function getNetworkConfig() {
+  const config = getSystemConfig();
+  const detectedPublicIp = detectPublicIp();
+  const localServerIp = getLocalServerIp();
+  const endpoint = config.endpoint || detectedPublicIp || '';
+
+  return {
+    ...config,
+    endpoint,
+    savedEndpoint: config.endpoint,
+    detectedPublicIp,
+    localServerIp,
+    firewallOpen: isFirewallPortOpen(config.port),
+    protocol: 'udp',
+    routerPortForwardTarget: localServerIp,
+    routerPortForwardPort: config.port,
   };
 }
 
@@ -119,6 +144,43 @@ router.post('/mode', (req, res) => {
 router.get('/config', (_req, res) => {
   try {
     return res.json(getSystemConfig());
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/network', (_req, res) => {
+  try {
+    return res.json(getNetworkConfig());
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.post('/network', (req, res) => {
+  try {
+    const endpoint = `${req.body?.endpoint || detectPublicIp() || ''}`.trim();
+    const port = `${req.body?.port || ''}`.trim();
+    const subnet = `${req.body?.subnet || ''}`.trim();
+
+    if (!endpoint) {
+      return res.status(400).json({ error: 'A public IP or hostname could not be detected. Set it manually.' });
+    }
+
+    if (!port || !/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535) {
+      return res.status(400).json({ error: 'A valid forwarded WireGuard port is required.' });
+    }
+
+    if (!subnet || !/^(25[0-5]|2[0-4]\d|1?\d?\d)\.(25[0-5]|2[0-4]\d|1?\d?\d)\.(25[0-5]|2[0-4]\d|1?\d?\d)$/.test(subnet)) {
+      return res.status(400).json({ error: 'A valid subnet prefix is required, for example 10.0.0.' });
+    }
+
+    applyWireguardServerConfig({ endpoint, port, subnet });
+
+    return res.json({
+      ...getNetworkConfig(),
+      message: 'Saved the public endpoint, WireGuard port, and firewall rules.',
+    });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }

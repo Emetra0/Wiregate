@@ -49,6 +49,12 @@ export const api = {
     }),
   system: () => request('/api/system'),
   systemConfig: () => request('/api/system/config'),
+  systemNetwork: () => request('/api/system/network'),
+  saveSystemNetwork: (body) =>
+    request('/api/system/network', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   saveSystemConfig: (body) =>
     request('/api/system/config', {
       method: 'POST',

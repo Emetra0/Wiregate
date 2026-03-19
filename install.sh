@@ -166,6 +166,16 @@ default_env_value() {
 }
 
 get_primary_ip() {
+  local public_ip
+  public_ip="$(curl -4 -fsSL https://api.ipify.org 2>/dev/null || true)"
+  if [[ -z "${public_ip}" ]]; then
+    public_ip="$(curl -4 -fsSL https://ifconfig.me 2>/dev/null || true)"
+  fi
+  if [[ -n "${public_ip}" ]]; then
+    printf '%s\n' "${public_ip}"
+    return
+  fi
+
   hostname -I | awk '{print $1}'
 }
 

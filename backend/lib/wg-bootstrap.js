@@ -11,6 +11,14 @@ function run(command) {
   }).trim();
 }
 
+function runOptional(command) {
+  try {
+    return run(command);
+  } catch {
+    return '';
+  }
+}
+
 function isLinux() {
   return process.platform === 'linux';
 }
@@ -24,7 +32,43 @@ function getValue(name, fallback) {
 }
 
 function getPrimaryIp() {
-  return run("hostname -I | awk '{print $1}'");
+  const detected = detectPublicIp();
+  if (detected) {
+    return detected;
+  }
+
+  return getLocalServerIp();
+}
+
+function getLocalServerIp() {
+  return runOptional("hostname -I | awk '{print $1}'");
+}
+
+function extractIpv4(value) {
+  const match = `${value || ''}`.match(/\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b/);
+  return match?.[0] || '';
+}
+
+function isPrivateIpv4(value) {
+  return /^(10\.|127\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(`${value || ''}`);
+}
+
+function detectPublicIp() {
+  const candidates = [
+    runOptional("curl -4 -fsSL https://api.ipify.org"),
+    runOptional("curl -4 -fsSL https://ifconfig.me"),
+    runOptional("wget -qO- https://api.ipify.org"),
+    runOptional("dig +short myip.opendns.com @resolver1.opendns.com"),
+  ];
+
+  for (const candidate of candidates) {
+    const ipv4 = extractIpv4(candidate);
+    if (ipv4 && !isPrivateIpv4(ipv4)) {
+      return ipv4;
+    }
+  }
+
+  return '';
 }
 
 function getDefaultInterface() {
@@ -42,6 +86,16 @@ function parsePrivateKeyFromConfig(configPath) {
   return match?.[1]?.trim() || '';
 }
 
+function parseConfigValue(content, key) {
+  const match = content.match(new RegExp(`^${key}\\s*=\\s*(.+)$`, 'm'));
+  return match?.[1]?.trim() || '';
+}
+
+function parseSubnetFromAddress(address) {
+  const match = `${address || ''}`.match(/^(\d+\.\d+\.\d+)\.\d+\/\d+$/);
+  return match?.[1] || '';
+}
+
 function updateConfigValue(content, key, value) {
   const pattern = new RegExp(`^${key}\\s*=\\s*.+$`, 'm');
   if (pattern.test(content)) {
@@ -54,6 +108,7 @@ function updateConfigValue(content, key, value) {
 function buildPostUp(iface, subnet, outboundIface, port) {
   return [
     `iptables -A INPUT -p udp --dport ${port} -j ACCEPT`,
+    `iptables -A INPUT -i ${iface} -j ACCEPT`,
     `iptables -A FORWARD -i ${iface} -j ACCEPT`,
     `iptables -A FORWARD -o ${iface} -j ACCEPT`,
     `iptables -t nat -A POSTROUTING -s ${subnet}.0/24 -o ${outboundIface} -j MASQUERADE`,
@@ -63,6 +118,7 @@ function buildPostUp(iface, subnet, outboundIface, port) {
 function buildPostDown(iface, subnet, outboundIface, port) {
   return [
     `iptables -D INPUT -p udp --dport ${port} -j ACCEPT`,
+    `iptables -D INPUT -i ${iface} -j ACCEPT`,
     `iptables -D FORWARD -i ${iface} -j ACCEPT`,
     `iptables -D FORWARD -o ${iface} -j ACCEPT`,
     `iptables -t nat -D POSTROUTING -s ${subnet}.0/24 -o ${outboundIface} -j MASQUERADE`,
@@ -155,6 +211,20 @@ function openFirewallPort(port) {
   }
 }
 
+function isFirewallPortOpen(port) {
+  const normalizedPort = Number(port);
+  if (!Number.isFinite(normalizedPort) || normalizedPort < 1 || normalizedPort > 65535) {
+    return false;
+  }
+
+  try {
+    run(`iptables -C INPUT -p udp --dport ${normalizedPort} -j ACCEPT`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function ensureWireguardBootstrap() {
   if (!isLinux()) {
     throw new Error('Automatic WireGuard bootstrap only works on Linux servers.');
@@ -166,6 +236,7 @@ function ensureWireguardBootstrap() {
   }
 
   ensureWireguardInstalled();
+  ensureIpForwarding();
 
   const iface = getValue('WG_INTERFACE', 'wg0');
   const subnet = getValue('WG_SUBNET', '10.0.0');
@@ -185,6 +256,22 @@ function ensureWireguardBootstrap() {
     if (privateKey) {
       publicKey = run(`printf '%s' '${privateKey}' | wg pubkey`);
     }
+
+    const outboundIface = getDefaultInterface();
+    if (!outboundIface) {
+      throw new Error('Unable to detect the default outbound interface.');
+    }
+
+    const existingConfig = fs.readFileSync(configPath, 'utf8');
+    const currentPort = parseConfigValue(existingConfig, 'ListenPort') || port;
+    const currentSubnet = parseSubnetFromAddress(parseConfigValue(existingConfig, 'Address')) || subnet;
+    const normalizedConfig = updateSubnetReferences(existingConfig, currentSubnet, currentSubnet, iface, outboundIface, currentPort);
+
+    if (normalizedConfig !== existingConfig) {
+      fs.writeFileSync(configPath, normalizedConfig, { encoding: 'utf8', mode: 0o600 });
+    }
+
+    openFirewallPort(currentPort);
   } else {
     const outboundIface = getDefaultInterface();
     if (!outboundIface) {
@@ -193,8 +280,6 @@ function ensureWireguardBootstrap() {
 
     privateKey = run('wg genkey');
     publicKey = run(`printf '%s' '${privateKey}' | wg pubkey`);
-    ensureIpForwarding();
-
     fs.writeFileSync(keyPath, `${privateKey}\n`, { encoding: 'utf8', mode: 0o600 });
     fs.writeFileSync(pubPath, `${publicKey}\n`, { encoding: 'utf8', mode: 0o600 });
     fs.writeFileSync(
@@ -315,4 +400,7 @@ function applyWireguardServerConfig({ endpoint, port, subnet }) {
 module.exports = {
   ensureWireguardBootstrap,
   applyWireguardServerConfig,
+  detectPublicIp,
+  getLocalServerIp,
+  isFirewallPortOpen,
 };
