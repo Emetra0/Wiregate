@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import Header from '../components/Header';
 import StatCard from '../components/StatCard';
 import { useToast } from '../components/Toast';
+import WebTerminal from '../components/WebTerminal';
 
 function formatUptime(seconds = 0) {
   const days = Math.floor(seconds / 86400);
@@ -39,7 +40,7 @@ export default function Dashboard({ onStatusChange }) {
   const [systemInfo, setSystemInfo] = useState(null);
   const [wgStatus, setWgStatus] = useState(null);
   const [users, setUsers] = useState([]);
-  const [terminalOutput, setTerminalOutput] = useState('Ready.');
+  const terminalRef = useRef(null);
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!silent) {
@@ -66,23 +67,27 @@ export default function Dashboard({ onStatusChange }) {
   }, [load]);
 
   const handleControl = async (action) => {
-    setBusyAction(action);
-    setTerminalOutput(`$ wg-quick ${action.toLowerCase() === 'restart' ? 'down/up' : action.toLowerCase()} ${wgStatus?.interface || 'wg0'}\n`);
-    try {
-      await new Promise((resolve, reject) => {
-        api.streamWireguardAction(action, {
-          onChunk: (chunk) => {
-            setTerminalOutput((current) => `${current}${chunk}`);
-          },
-          onEnd: resolve,
-          onError: reject,
-        });
-      });
+    const iface = wgStatus?.interface || 'wg0';
+    const commands = {
+      Start: `sudo wg-quick up ${iface}`,
+      Stop: `sudo wg-quick down ${iface}`,
+      Restart: `sudo wg-quick down ${iface}; sudo wg-quick up ${iface}`,
+    };
 
-      showToast(`WireGuard ${action.toLowerCase()} complete`, 'success');
-      await load({ silent: true });
+    const command = commands[action];
+    if (!command || !terminalRef.current?.runCommand) {
+      showToast('Web terminal is not ready yet', 'error');
+      return;
+    }
+
+    setBusyAction(action);
+    try {
+      await terminalRef.current.runCommand(command);
+      showToast(`WireGuard ${action.toLowerCase()} command sent`, 'success');
+      window.setTimeout(() => {
+        load({ silent: true });
+      }, 1500);
     } catch (error) {
-      setTerminalOutput((current) => `${current}\n[error] ${error.message}`);
       showToast(error.message, 'error');
     } finally {
       setBusyAction('');
@@ -124,7 +129,7 @@ export default function Dashboard({ onStatusChange }) {
         <div className="section-head">
           <div>
             <h2>WireGuard status</h2>
-            <p className="page-sub">Interface controls and last command output.</p>
+            <p className="page-sub">Interface controls and the live server terminal.</p>
           </div>
           <span className={`badge ${wgStatus?.running ? 'badge-online' : 'badge-offline'}`}>
             {wgStatus?.running ? 'Running' : 'Stopped'}
@@ -158,7 +163,7 @@ export default function Dashboard({ onStatusChange }) {
           </button>
         </div>
 
-        <pre className="terminal">{terminalOutput}</pre>
+        <WebTerminal ref={terminalRef} />
       </div>
 
       <div className="card section-card">

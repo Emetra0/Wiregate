@@ -96,6 +96,7 @@ function writeInput(input) {
   }
 
   ensureSession();
+  appendOutput(`$ ${command}\n`);
   shellProcess.stdin.write(`${command}\n`);
 
   return {

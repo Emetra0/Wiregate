@@ -3,6 +3,18 @@ import { api } from '../api';
 import Header from '../components/Header';
 import { useToast } from '../components/Toast';
 
+const terminalHistoryStorageKey = 'wiregate-web-terminal-history';
+
+function readStoredTerminalHistory() {
+  try {
+    const raw = window.localStorage.getItem(terminalHistoryStorageKey);
+    const parsed = JSON.parse(raw || '[]');
+    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string' && item.trim()) : [];
+  } catch {
+    return [];
+  }
+}
+
 export default function Settings({ onStatusChange }) {
   const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
@@ -14,6 +26,8 @@ export default function Settings({ onStatusChange }) {
   const [webTerminalOutput, setWebTerminalOutput] = useState('Connecting to shell...');
   const [webTerminalInput, setWebTerminalInput] = useState('');
   const [webTerminalBusy, setWebTerminalBusy] = useState(false);
+  const [webTerminalHistory, setWebTerminalHistory] = useState(() => readStoredTerminalHistory());
+  const [webTerminalHistoryIndex, setWebTerminalHistoryIndex] = useState(-1);
   const [busyAction, setBusyAction] = useState('');
   const [configBusy, setConfigBusy] = useState(false);
   const [commandBusy, setCommandBusy] = useState('');
@@ -78,6 +92,14 @@ export default function Settings({ onStatusChange }) {
 
     panel.scrollTop = panel.scrollHeight;
   }, [webTerminalOutput]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(terminalHistoryStorageKey, JSON.stringify(webTerminalHistory.slice(0, 100)));
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [webTerminalHistory]);
 
   const runTerminalAction = useCallback(
     async ({ action, commandText, successMessage, busyValue }) => {
@@ -236,8 +258,12 @@ export default function Settings({ onStatusChange }) {
 
     setWebTerminalBusy(true);
     try {
-      setWebTerminalOutput((current) => `${current}${current.endsWith('\n') || !current ? '' : '\n'}$ ${input}\n`);
       await api.sendSystemTerminalInput(input);
+      setWebTerminalHistory((current) => {
+        const nextHistory = [input, ...current.filter((item) => item !== input)];
+        return nextHistory.slice(0, 100);
+      });
+      setWebTerminalHistoryIndex(-1);
       setWebTerminalInput('');
     } catch (error) {
       showToast(error.message, 'error');
@@ -265,6 +291,35 @@ export default function Settings({ onStatusChange }) {
     } catch (error) {
       showToast(error.message, 'error');
     }
+  };
+
+  const handleWebTerminalHistoryKey = (event) => {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') {
+      return;
+    }
+
+    if (!webTerminalHistory.length) {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (event.key === 'ArrowUp') {
+      const nextIndex = Math.min(webTerminalHistoryIndex + 1, webTerminalHistory.length - 1);
+      setWebTerminalHistoryIndex(nextIndex);
+      setWebTerminalInput(webTerminalHistory[nextIndex] || '');
+      return;
+    }
+
+    const nextIndex = webTerminalHistoryIndex - 1;
+    if (nextIndex < 0) {
+      setWebTerminalHistoryIndex(-1);
+      setWebTerminalInput('');
+      return;
+    }
+
+    setWebTerminalHistoryIndex(nextIndex);
+    setWebTerminalInput(webTerminalHistory[nextIndex] || '');
   };
 
   return (
@@ -443,14 +498,20 @@ export default function Settings({ onStatusChange }) {
           <div className="web-terminal-controls">
             <input
               className="input web-terminal-input mono-text"
-              placeholder="Type a command and press Enter"
+              placeholder="Type a command, press Enter, use ↑ for previous commands"
               value={webTerminalInput}
-              onChange={(event) => setWebTerminalInput(event.target.value)}
+              onChange={(event) => {
+                setWebTerminalInput(event.target.value);
+                setWebTerminalHistoryIndex(-1);
+              }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && !event.shiftKey) {
                   event.preventDefault();
                   handleWebTerminalSubmit();
+                  return;
                 }
+
+                handleWebTerminalHistoryKey(event);
               }}
             />
             <div className="button-row">
