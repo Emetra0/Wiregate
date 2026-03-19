@@ -1,52 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../api';
+import ServerTerminal from '../components/ServerTerminal';
 import Header from '../components/Header';
 import { useToast } from '../components/Toast';
-
-const terminalHistoryStorageKey = 'wiregate-web-terminal-history';
-
-function readStoredTerminalHistory() {
-  try {
-    const raw = window.localStorage.getItem(terminalHistoryStorageKey);
-    const parsed = JSON.parse(raw || '[]');
-    return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string' && item.trim()) : [];
-  } catch {
-    return [];
-  }
-}
 
 export default function Settings({ onStatusChange }) {
   const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState(null);
   const [config, setConfig] = useState(null);
-  const [updateState, setUpdateState] = useState(null);
-  const [commandState, setCommandState] = useState(null);
-  const [terminalOutput, setTerminalOutput] = useState('Ready.');
-  const [webTerminalOutput, setWebTerminalOutput] = useState('Connecting to shell...');
-  const [webTerminalInput, setWebTerminalInput] = useState('');
-  const [webTerminalBusy, setWebTerminalBusy] = useState(false);
-  const [webTerminalHistory, setWebTerminalHistory] = useState(() => readStoredTerminalHistory());
-  const [webTerminalHistoryIndex, setWebTerminalHistoryIndex] = useState(-1);
   const [busyAction, setBusyAction] = useState('');
   const [configBusy, setConfigBusy] = useState(false);
-  const [commandBusy, setCommandBusy] = useState('');
-  const [updateBusy, setUpdateBusy] = useState(false);
-  const [repairBusy, setRepairBusy] = useState(false);
-  const webTerminalRef = useRef(null);
+  const [shortcutBusy, setShortcutBusy] = useState('');
+  const terminalRef = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [nextStatus, nextCommands, nextUpdateState, nextConfig] = await Promise.all([
-        api.wgStatus(),
-        api.systemCommands(),
-        api.updateStatus(),
-        api.systemConfig(),
-      ]);
+      const [nextStatus, nextConfig] = await Promise.all([api.wgStatus(), api.systemConfig()]);
       setStatus(nextStatus);
-      setCommandState(nextCommands);
-      setUpdateState(nextUpdateState);
       setConfig(nextConfig);
       onStatusChange?.(nextStatus);
     } catch (error) {
@@ -60,90 +33,24 @@ export default function Settings({ onStatusChange }) {
     load();
   }, [load]);
 
-  useEffect(() => {
-    const stopStream = api.streamSystemTerminal({
-      onSnapshot: (data) => {
-        setWebTerminalOutput(data.output || '');
-      },
-      onChunk: (chunk) => {
-        setWebTerminalOutput((current) => `${current}${chunk}`);
-      },
-      onClear: () => {
-        setWebTerminalOutput('');
-      },
-      onExit: () => {
-        setWebTerminalOutput((current) => `${current}\n[terminal disconnected]\n`);
-      },
-      onError: (error) => {
-        showToast(error.message, 'error');
-      },
-    });
-
-    return () => {
-      stopStream?.();
-    };
-  }, [showToast]);
-
-  useEffect(() => {
-    const panel = webTerminalRef.current;
-    if (!panel) {
-      return;
-    }
-
-    panel.scrollTop = panel.scrollHeight;
-  }, [webTerminalOutput]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(terminalHistoryStorageKey, JSON.stringify(webTerminalHistory.slice(0, 100)));
-    } catch {
-      // Ignore storage failures.
-    }
-  }, [webTerminalHistory]);
-
   const runTerminalAction = useCallback(
-    async ({ action, commandText, successMessage, busyValue }) => {
+    async ({ commandText, successMessage, busyValue }) => {
       setBusyAction(busyValue);
-      setTerminalOutput(`${commandText}\n`);
       try {
-        await new Promise((resolve, reject) => {
-          api.streamWireguardAction(action, {
-            onChunk: (chunk) => {
-              setTerminalOutput((current) => `${current}${chunk}`);
-            },
-            onEnd: resolve,
-            onError: reject,
-          });
-        });
-
+        terminalRef.current?.focus();
+        terminalRef.current?.runCommand(commandText);
         showToast(successMessage, 'success');
-        await load();
+        window.setTimeout(() => {
+          load();
+        }, 1500);
       } catch (error) {
-        setTerminalOutput((current) => `${current}\n[error] ${error.message}`);
         showToast(error.message, 'error');
       } finally {
         setBusyAction('');
       }
     },
-    [load, showToast]
+    [load, showToast, terminalRef]
   );
-
-  useEffect(() => {
-    if (!updateState?.running) {
-      return undefined;
-    }
-
-    const interval = window.setInterval(async () => {
-      try {
-        const nextUpdateState = await api.updateStatus();
-        setUpdateState(nextUpdateState);
-      } catch (error) {
-        showToast(error.message, 'error');
-      }
-    }, 3000);
-
-    return () => window.clearInterval(interval);
-  }, [showToast, updateState?.running]);
 
   const copyPublicKey = async () => {
     try {
@@ -157,34 +64,33 @@ export default function Settings({ onStatusChange }) {
   const handleControl = async (action) => {
     const normalized = action.toLowerCase();
     return runTerminalAction({
-      action,
-      commandText: `$ wg-quick ${normalized === 'restart' ? 'down/up' : normalized} ${status?.interface || 'wg0'}`,
-      successMessage: `WireGuard ${normalized} complete`,
+      commandText:
+        normalized === 'restart'
+          ? `wg-quick down ${status?.interface || 'wg0'}; wg-quick up ${status?.interface || 'wg0'}`
+          : `wg-quick ${normalized} ${status?.interface || 'wg0'}`,
+      successMessage: `Sent WireGuard ${normalized} command to the live server shell.`,
       busyValue: action,
     });
   };
 
   const handleServiceRestart = async () => {
     return runTerminalAction({
-      action: 'service-restart',
-      commandText: `$ systemctl restart wg-quick@${status?.interface || 'wg0'} ; systemctl status wg-quick@${status?.interface || 'wg0'} --no-pager`,
-      successMessage: 'WireGuard service restart complete',
+      commandText: `systemctl restart wg-quick@${status?.interface || 'wg0'} ; systemctl status wg-quick@${status?.interface || 'wg0'} --no-pager`,
+      successMessage: 'Sent WireGuard service restart to the live server shell.',
       busyValue: 'service-restart',
     });
   };
 
-  const handlePresetCommand = async (commandId) => {
-    setCommandBusy(commandId);
-    setTerminalOutput(`$ preset:${commandId}\n`);
+  const runShortcut = async (shortcut) => {
+    setShortcutBusy(shortcut.id);
     try {
-      const result = await api.runSystemCommand(commandId);
-      setTerminalOutput((result.output || 'Command completed with no output.').trim());
-      showToast(`${result.label} complete`, 'success');
+      terminalRef.current?.focus();
+      terminalRef.current?.runCommand(shortcut.command);
+      showToast(`${shortcut.label} sent to the live server shell.`, 'success');
     } catch (error) {
-      setTerminalOutput(`[error] ${error.message}`);
       showToast(error.message, 'error');
     } finally {
-      setCommandBusy('');
+      setShortcutBusy('');
     }
   };
 
@@ -215,9 +121,8 @@ export default function Settings({ onStatusChange }) {
       showToast(result.message || 'Saved server network settings', 'success');
       await load();
       await runTerminalAction({
-        action: 'service-restart',
-        commandText: `$ systemctl restart wg-quick@${result.interface || status?.interface || 'wg0'} ; systemctl status wg-quick@${result.interface || status?.interface || 'wg0'} --no-pager`,
-        successMessage: 'WireGuard server restarted with the updated settings',
+        commandText: `systemctl restart wg-quick@${result.interface || status?.interface || 'wg0'} ; systemctl status wg-quick@${result.interface || status?.interface || 'wg0'} --no-pager`,
+        successMessage: 'Applied settings and sent the restart command to the live server shell.',
         busyValue: 'service-restart',
       });
     } catch (error) {
@@ -227,100 +132,41 @@ export default function Settings({ onStatusChange }) {
     }
   };
 
-  const handleStartUpdate = async (forceInstall = false) => {
-    if (forceInstall) {
-      setRepairBusy(true);
-    } else {
-      setUpdateBusy(true);
-    }
-
-    try {
-      const result = await api.startUpdate({ forceInstall });
-      showToast(result.message || 'Update started', 'success');
-      const nextUpdateState = await api.updateStatus();
-      setUpdateState(nextUpdateState);
-    } catch (error) {
-      showToast(error.message, 'error');
-    } finally {
-      if (forceInstall) {
-        setRepairBusy(false);
-      } else {
-        setUpdateBusy(false);
-      }
-    }
-  };
-
-  const handleWebTerminalSubmit = async () => {
-    const input = webTerminalInput.trim();
-    if (!input) {
-      return;
-    }
-
-    setWebTerminalBusy(true);
-    try {
-      await api.sendSystemTerminalInput(input);
-      setWebTerminalHistory((current) => {
-        const nextHistory = [input, ...current.filter((item) => item !== input)];
-        return nextHistory.slice(0, 100);
-      });
-      setWebTerminalHistoryIndex(-1);
-      setWebTerminalInput('');
-    } catch (error) {
-      showToast(error.message, 'error');
-      setWebTerminalOutput((current) => `${current}\n[error] ${error.message}\n`);
-    } finally {
-      setWebTerminalBusy(false);
-    }
-  };
-
-  const handleWebTerminalInterrupt = async () => {
-    setWebTerminalBusy(true);
-    try {
-      await api.interruptSystemTerminal();
-    } catch (error) {
-      showToast(error.message, 'error');
-    } finally {
-      setWebTerminalBusy(false);
-    }
-  };
-
-  const handleWebTerminalClear = async () => {
-    try {
-      await api.clearSystemTerminal();
-      setWebTerminalOutput('');
-    } catch (error) {
-      showToast(error.message, 'error');
-    }
-  };
-
-  const handleWebTerminalHistoryKey = (event) => {
-    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') {
-      return;
-    }
-
-    if (!webTerminalHistory.length) {
-      return;
-    }
-
-    event.preventDefault();
-
-    if (event.key === 'ArrowUp') {
-      const nextIndex = Math.min(webTerminalHistoryIndex + 1, webTerminalHistory.length - 1);
-      setWebTerminalHistoryIndex(nextIndex);
-      setWebTerminalInput(webTerminalHistory[nextIndex] || '');
-      return;
-    }
-
-    const nextIndex = webTerminalHistoryIndex - 1;
-    if (nextIndex < 0) {
-      setWebTerminalHistoryIndex(-1);
-      setWebTerminalInput('');
-      return;
-    }
-
-    setWebTerminalHistoryIndex(nextIndex);
-    setWebTerminalInput(webTerminalHistory[nextIndex] || '');
-  };
+  const terminalShortcuts = useMemo(
+    () => [
+      {
+        id: 'wiregate-status',
+        label: 'WireGate service status',
+        description: 'Show the current backend service status.',
+        command: 'systemctl status wiregate --no-pager',
+      },
+      {
+        id: 'wiregate-logs',
+        label: 'WireGate recent logs',
+        description: 'Show the latest backend log output.',
+        command: 'journalctl -u wiregate -n 100 --no-pager',
+      },
+      {
+        id: 'restart-wiregate',
+        label: 'Restart WireGate backend',
+        description: 'Restart the backend and show the new status.',
+        command: 'systemctl restart wiregate; systemctl status wiregate --no-pager',
+      },
+      {
+        id: 'wg-show',
+        label: 'WireGuard interface status',
+        description: 'Show the real WireGuard interface state.',
+        command: `wg show ${status?.interface || 'wg0'}`,
+      },
+      {
+        id: 'wg-service-status',
+        label: 'WireGuard service status',
+        description: 'Show the wg-quick service state.',
+        command: `systemctl status wg-quick@${status?.interface || 'wg0'} --no-pager`,
+      },
+    ],
+    [status?.interface]
+  );
 
   return (
     <div className="page">
@@ -462,16 +308,13 @@ export default function Settings({ onStatusChange }) {
           <div className="section-head">
             <div>
               <h2>WireGuard interface controls</h2>
-              <p className="page-sub">Start, stop or restart the active interface with live terminal output.</p>
+              <p className="page-sub">Start or restart the active interface with live terminal output.</p>
             </div>
           </div>
 
           <div className="button-row">
             <button className="btn btn-success" type="button" disabled={!!busyAction} onClick={() => handleControl('Start')}>
               Start
-            </button>
-            <button className="btn btn-danger" type="button" disabled={!!busyAction} onClick={() => handleControl('Stop')}>
-              Stop
             </button>
             <button className="btn btn-amber" type="button" disabled={!!busyAction} onClick={() => handleControl('Restart')}>
               Restart
@@ -481,129 +324,65 @@ export default function Settings({ onStatusChange }) {
             </button>
           </div>
 
-          <pre className="terminal">{terminalOutput}</pre>
+          <ServerTerminal ref={terminalRef} height="34vh" />
         </div>
 
         <div className="card section-card">
           <div className="section-head">
             <div>
-              <h2>Web terminal</h2>
-              <p className="page-sub">Run commands directly from the website in the same server shell session.</p>
+              <h2>Terminal</h2>
+              <p className="page-sub">The terminal below is the same live Ubuntu shell session as the dedicated terminal page.</p>
             </div>
-            <span className="badge badge-online">Interactive shell</span>
+            <span className="badge badge-online">Direct shell</span>
           </div>
 
-          <pre ref={webTerminalRef} className="terminal web-terminal-output">{webTerminalOutput || ' '}</pre>
-
-          <div className="web-terminal-controls">
-            <input
-              className="input web-terminal-input mono-text"
-              placeholder="Type a command, press Enter, use ↑ for previous commands"
-              value={webTerminalInput}
-              onChange={(event) => {
-                setWebTerminalInput(event.target.value);
-                setWebTerminalHistoryIndex(-1);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  handleWebTerminalSubmit();
-                  return;
-                }
-
-                handleWebTerminalHistoryKey(event);
-              }}
-            />
-            <div className="button-row">
-              <button className="btn btn-primary" type="button" onClick={handleWebTerminalSubmit} disabled={webTerminalBusy}>
-                Send
-              </button>
-              <button className="btn btn-amber" type="button" onClick={handleWebTerminalInterrupt} disabled={webTerminalBusy}>
-                Ctrl+C
-              </button>
-              <button className="btn btn-ghost" type="button" onClick={handleWebTerminalClear}>
-                Clear
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="card section-card">
-          <div className="section-head">
-            <div>
-              <h2>Local command presets</h2>
-              <p className="page-sub">Run safe server-side admin commands from the panel.</p>
-            </div>
-            <span className={`badge ${commandState?.enabled ? 'badge-online' : 'badge-offline'}`}>
-              {commandState?.enabled ? 'Enabled' : 'Disabled'}
-            </span>
-          </div>
-
-          {!commandState?.enabled ? (
-            <div className="notice">
-              Set `ENABLE_COMMAND_CENTER=true` in `.env` to enable preset terminal commands from the web UI.
-            </div>
-          ) : (
-            <div className="command-grid">
-              {commandState?.commands?.map((command) => (
-                <button
-                  key={command.id}
-                  className="command-card"
-                  type="button"
-                  onClick={() => handlePresetCommand(command.id)}
-                  disabled={!!commandBusy}
-                >
-                  <span className="command-title">{command.label}</span>
-                  <span className="command-copy">{command.description}</span>
-                  <span className="command-meta">{commandBusy === command.id ? 'Running…' : 'Run preset'}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="card section-card">
-          <div className="section-head">
-            <div>
-              <h2>Update WireGate</h2>
-              <p className="page-sub">Use the buttons below to rerun the Ubuntu installer so the latest site build and server setup are applied again.</p>
-            </div>
-            <span className={`badge ${updateState?.running ? 'badge-online' : 'badge-offline'}`}>
-              {updateState?.running ? 'Updating' : updateState?.status || 'Idle'}
-            </span>
+          <div className="notice">
+            Use the embedded shell below for live server data, or open the full terminal page for a larger view.
           </div>
 
           <div className="button-row">
-            <button className="btn btn-primary" type="button" onClick={() => handleStartUpdate(false)} disabled={updateBusy || repairBusy || updateState?.running}>
-              {updateBusy || updateState?.running ? 'Installer running…' : 'Run installer update'}
-            </button>
-            <button className="btn btn-amber" type="button" onClick={() => handleStartUpdate(true)} disabled={updateBusy || repairBusy || updateState?.running}>
-              {repairBusy || updateState?.running ? 'Repair running…' : 'Run installer repair'}
-            </button>
+            <Link className="btn btn-primary" to="/terminal">
+              Open full terminal
+            </Link>
+          </div>
+        </div>
+
+        <div className="card section-card">
+          <div className="section-head">
+            <div>
+              <h2>Server terminal shortcuts</h2>
+              <p className="page-sub">These shortcuts send real shell commands into the live Ubuntu terminal below.</p>
+            </div>
+            <span className="badge badge-online">Live shell</span>
           </div>
 
-          <div className="update-meta-grid">
-            <div className="detail-item">
-              <span className="meta-label">Last update state</span>
-              <strong>{updateState?.status || '--'}</strong>
+          <div className="command-grid">
+            {terminalShortcuts.map((shortcut) => (
+              <button
+                key={shortcut.id}
+                className="command-card"
+                type="button"
+                onClick={() => runShortcut(shortcut)}
+                disabled={!!shortcutBusy}
+              >
+                <span className="command-title">{shortcut.label}</span>
+                <span className="command-copy">{shortcut.description}</span>
+                <span className="command-meta">{shortcutBusy === shortcut.id ? 'Sending…' : 'Send to terminal'}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="card section-card">
+          <div className="section-head">
+            <div>
+              <h2>Live server terminal</h2>
+              <p className="page-sub">This is the real Ubuntu shell. All shortcuts above send commands into this session.</p>
             </div>
-            <div className="detail-item">
-              <span className="meta-label">Update available</span>
-              <strong>
-                {typeof updateState?.updateAvailable === 'boolean'
-                  ? updateState.updateAvailable
-                    ? 'Yes'
-                    : 'No'
-                  : 'Unknown'}
-              </strong>
-            </div>
-            <div className="detail-item detail-span">
-              <span className="meta-label">Latest message</span>
-              <strong>{updateState?.message || 'No update started yet.'}</strong>
-            </div>
+            <span className="badge badge-online">PTY shell</span>
           </div>
 
-          <pre className="terminal update-terminal">{updateState?.log || 'No update log yet.'}</pre>
+          <ServerTerminal ref={terminalRef} height="38vh" />
         </div>
 
         <div className="card section-card">

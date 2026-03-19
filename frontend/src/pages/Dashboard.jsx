@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '../api';
+import ServerTerminal from '../components/ServerTerminal';
 import Header from '../components/Header';
 import StatCard from '../components/StatCard';
 import { useToast } from '../components/Toast';
-import WebTerminal from '../components/WebTerminal';
 
 function formatUptime(seconds = 0) {
   const days = Math.floor(seconds / 86400);
@@ -36,7 +37,6 @@ function truncateMiddle(value = '') {
 export default function Dashboard({ onStatusChange }) {
   const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
-  const [busyAction, setBusyAction] = useState('');
   const [systemInfo, setSystemInfo] = useState(null);
   const [wgStatus, setWgStatus] = useState(null);
   const [users, setUsers] = useState([]);
@@ -69,28 +69,19 @@ export default function Dashboard({ onStatusChange }) {
   const handleControl = async (action) => {
     const iface = wgStatus?.interface || 'wg0';
     const commands = {
-      Start: `sudo wg-quick up ${iface}`,
-      Stop: `sudo wg-quick down ${iface}`,
-      Restart: `sudo wg-quick down ${iface}; sudo wg-quick up ${iface}`,
+      Start: `wg-quick up ${iface}`,
+      Restart: `wg-quick down ${iface}; wg-quick up ${iface}`,
     };
 
-    const command = commands[action];
-    if (!command || !terminalRef.current?.runCommand) {
-      showToast('Web terminal is not ready yet', 'error');
-      return;
-    }
-
-    setBusyAction(action);
     try {
-      await terminalRef.current.runCommand(command);
-      showToast(`WireGuard ${action.toLowerCase()} command sent`, 'success');
+      terminalRef.current?.focus();
+      terminalRef.current?.runCommand(commands[action]);
+      showToast(`Sent ${action.toLowerCase()} command to the live server shell.`, 'success');
       window.setTimeout(() => {
         load({ silent: true });
       }, 1500);
     } catch (error) {
       showToast(error.message, 'error');
-    } finally {
-      setBusyAction('');
     }
   };
 
@@ -129,7 +120,7 @@ export default function Dashboard({ onStatusChange }) {
         <div className="section-head">
           <div>
             <h2>WireGuard status</h2>
-            <p className="page-sub">Interface controls and the live server terminal.</p>
+            <p className="page-sub">Interface status. Use the live server terminal below or open the full terminal page.</p>
           </div>
           <span className={`badge ${wgStatus?.running ? 'badge-online' : 'badge-offline'}`}>
             {wgStatus?.running ? 'Running' : 'Stopped'}
@@ -152,18 +143,18 @@ export default function Dashboard({ onStatusChange }) {
         </div>
 
         <div className="button-row">
-          <button className="btn btn-success" type="button" disabled={!!busyAction} onClick={() => handleControl('Start')}>
+          <button className="btn btn-success" type="button" onClick={() => handleControl('Start')}>
             Start
           </button>
-          <button className="btn btn-danger" type="button" disabled={!!busyAction} onClick={() => handleControl('Stop')}>
-            Stop
-          </button>
-          <button className="btn btn-amber" type="button" disabled={!!busyAction} onClick={() => handleControl('Restart')}>
+          <button className="btn btn-amber" type="button" onClick={() => handleControl('Restart')}>
             Restart
           </button>
+          <Link className="btn btn-primary" to="/terminal">
+            Open full terminal
+          </Link>
         </div>
 
-        <WebTerminal ref={terminalRef} />
+        <ServerTerminal ref={terminalRef} height="42vh" />
       </div>
 
       <div className="card section-card">

@@ -54,68 +54,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  updateStatus: () => request('/api/system/update'),
-  startUpdate: (body = {}) =>
-    request('/api/system/update', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
-  systemCommands: () => request('/api/system/commands'),
-  runSystemCommand: (commandId) =>
-    request(`/api/system/commands/${encodeURIComponent(commandId)}`, {
-      method: 'POST',
-    }),
   systemTerminal: () => request('/api/system/terminal'),
-  sendSystemTerminalInput: (input) =>
-    request('/api/system/terminal/input', {
-      method: 'POST',
-      body: JSON.stringify({ input }),
-    }),
-  interruptSystemTerminal: () =>
-    request('/api/system/terminal/interrupt', {
-      method: 'POST',
-    }),
-  clearSystemTerminal: () =>
-    request('/api/system/terminal/clear', {
-      method: 'POST',
-    }),
-  streamSystemTerminal(handlers = {}) {
-    const source = new EventSource('/api/system/terminal/stream');
-    let ended = false;
-
-    source.addEventListener('snapshot', (event) => {
-      const data = JSON.parse(event.data);
-      handlers.onSnapshot?.(data);
-    });
-
-    source.addEventListener('chunk', (event) => {
-      const data = JSON.parse(event.data);
-      handlers.onChunk?.(data.chunk);
-    });
-
-    source.addEventListener('clear', () => {
-      handlers.onClear?.();
-    });
-
-    source.addEventListener('exit', (event) => {
-      ended = true;
-      const data = JSON.parse(event.data);
-      handlers.onExit?.(data);
-      source.close();
-    });
-
-    source.onerror = () => {
-      if (ended) {
-        return;
-      }
-      handlers.onError?.(new Error('Terminal stream disconnected unexpectedly'));
-    };
-
-    return () => {
-      ended = true;
-      source.close();
-    };
-  },
   streamWireguardAction(action, handlers = {}) {
     const source = new EventSource(`/api/wireguard/stream/${encodeURIComponent(action.toLowerCase())}`);
     let ended = false;

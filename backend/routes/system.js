@@ -1,9 +1,7 @@
 const express = require('express');
 const os = require('os');
-const commandRunner = require('../lib/command-runner');
 const envStore = require('../lib/env-store');
 const terminalManager = require('../lib/terminal-manager');
-const updateManager = require('../lib/update-manager');
 const { ensureWireguardBootstrap, applyWireguardServerConfig } = require('../lib/wg-bootstrap');
 
 const router = express.Router();
@@ -67,69 +65,9 @@ router.get('/', (_req, res) => {
   }
 });
 
-router.get('/commands', (_req, res) => {
-  try {
-    return res.json(commandRunner.listCommands());
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-});
-
-router.post('/commands/:commandId', (req, res) => {
-  try {
-    return res.json(commandRunner.runCommand(req.params.commandId));
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-});
-
 router.get('/terminal', (_req, res) => {
   try {
     return res.json(terminalManager.getState());
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-});
-
-router.get('/terminal/stream', (req, res) => {
-  try {
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-    res.flushHeaders?.();
-
-    const unsubscribe = terminalManager.subscribe((event, payload) => {
-      res.write(`event: ${event}\n`);
-      res.write(`data: ${JSON.stringify(payload)}\n\n`);
-    });
-
-    req.on('close', () => {
-      unsubscribe();
-    });
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-});
-
-router.post('/terminal/input', (req, res) => {
-  try {
-    return res.json(terminalManager.writeInput(req.body?.input));
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-});
-
-router.post('/terminal/interrupt', (_req, res) => {
-  try {
-    return res.json(terminalManager.interrupt());
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-});
-
-router.post('/terminal/clear', (_req, res) => {
-  try {
-    return res.json(terminalManager.clearOutput());
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
@@ -210,22 +148,6 @@ router.post('/config', (req, res) => {
       publicKey: applied.publicKey,
       message: 'Saved and applied the WireGuard endpoint, port, and subnet.',
     });
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-});
-
-router.get('/update', (_req, res) => {
-  try {
-    return res.json(updateManager.getStatus());
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-});
-
-router.post('/update', (req, res) => {
-  try {
-    return res.json(updateManager.startUpdate({ forceInstall: Boolean(req.body?.forceInstall) }));
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
