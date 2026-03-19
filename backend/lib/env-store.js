@@ -78,10 +78,9 @@ function updateEnvValues(entries) {
 }
 
 function currentMode() {
-  const demo = `${process.env.DEMO_MODE ?? 'true'}`.toLowerCase() !== 'false';
   return {
-    demo,
-    mode: demo ? 'test' : 'production',
+    demo: false,
+    mode: 'production',
     envFilePath: getEnvFilePath(),
   };
 }

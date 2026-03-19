@@ -3,13 +3,9 @@ const os = require('os');
 const commandRunner = require('../lib/command-runner');
 const envStore = require('../lib/env-store');
 const updateManager = require('../lib/update-manager');
-const { ensureWireguardBootstrap } = require('../lib/wg-bootstrap');
+const { ensureWireguardBootstrap, applyWireguardServerConfig } = require('../lib/wg-bootstrap');
 
 const router = express.Router();
-
-function isDemoMode() {
-  return `${process.env.DEMO_MODE ?? 'true'}`.toLowerCase() !== 'false';
-}
 
 function autoSetupEnabled() {
   return `${process.env.AUTO_SETUP_WIREGUARD ?? 'true'}`.toLowerCase() !== 'false';
@@ -57,17 +53,6 @@ function getSystemConfig() {
 
 router.get('/', (_req, res) => {
   try {
-    if (isDemoMode()) {
-      return res.json({
-        uptime: 60 * 60 * 24 * 3 + 60 * 60 * 7 + 60 * 42,
-        hostname: 'wiregate-demo',
-        platform: 'linux',
-        memTotal: 8 * 1024 * 1024 * 1024,
-        memFree: 5.2 * 1024 * 1024 * 1024,
-        loadAvg: [0.18, 0.26, 0.31],
-      });
-    }
-
     return res.json({
       uptime: os.uptime(),
       hostname: os.hostname(),
@@ -107,10 +92,9 @@ router.get('/mode', (_req, res) => {
 
 router.post('/mode', (req, res) => {
   try {
-    const requestedDemo = Boolean(req.body?.demo);
     let bootstrapResult = null;
 
-    if (!requestedDemo && !hasProductionValues()) {
+    if (!hasProductionValues()) {
       if (autoSetupEnabled() && os.platform() === 'linux') {
         bootstrapResult = ensureWireguardBootstrap();
       }
@@ -123,15 +107,13 @@ router.post('/mode', (req, res) => {
       }
     }
 
-    envStore.updateEnvValues({ DEMO_MODE: requestedDemo ? 'true' : 'false' });
+    envStore.updateEnvValues({ DEMO_MODE: 'false' });
 
     return res.json(
       getModeState({
-        message: requestedDemo
-          ? 'Switched to test mode.'
-          : bootstrapResult
-            ? `Switched to production mode and auto-configured ${bootstrapResult.interface}.`
-            : 'Switched to production mode.',
+        message: bootstrapResult
+          ? `WireGate is running in production mode and auto-configured ${bootstrapResult.interface}.`
+          : 'WireGate is running in production mode.',
         bootstrap: bootstrapResult,
       })
     );
@@ -151,16 +133,23 @@ router.get('/config', (_req, res) => {
 router.post('/config', (req, res) => {
   try {
     const endpoint = `${req.body?.endpoint || ''}`.trim();
+    const port = `${req.body?.port || ''}`.trim();
 
     if (!endpoint) {
       return res.status(400).json({ error: 'Public IP or hostname is required.' });
     }
 
-    envStore.updateEnvValues({ WG_SERVER_ENDPOINT: endpoint });
+    if (!port || !/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535) {
+      return res.status(400).json({ error: 'A valid forwarded WireGuard port is required.' });
+    }
+
+    const applied = applyWireguardServerConfig({ endpoint, port });
 
     return res.json({
       ...getSystemConfig(),
-      message: 'Saved WireGuard public endpoint to .env.',
+      interface: applied.interface,
+      publicKey: applied.publicKey,
+      message: 'Saved and applied the WireGuard public endpoint and listen port.',
     });
   } catch (error) {
     return res.status(500).json({ error: error.message });

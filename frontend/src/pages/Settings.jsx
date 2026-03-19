@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import Header from '../components/Header';
 import { useToast } from '../components/Toast';
@@ -7,13 +7,11 @@ export default function Settings({ onStatusChange }) {
   const { showToast } = useToast();
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState(null);
-  const [mode, setMode] = useState(null);
   const [config, setConfig] = useState(null);
   const [updateState, setUpdateState] = useState(null);
   const [commandState, setCommandState] = useState(null);
   const [terminalOutput, setTerminalOutput] = useState('Ready.');
   const [busyAction, setBusyAction] = useState('');
-  const [busyMode, setBusyMode] = useState(false);
   const [configBusy, setConfigBusy] = useState(false);
   const [commandBusy, setCommandBusy] = useState('');
   const [updateBusy, setUpdateBusy] = useState(false);
@@ -22,15 +20,13 @@ export default function Settings({ onStatusChange }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [nextStatus, nextMode, nextCommands, nextUpdateState, nextConfig] = await Promise.all([
+      const [nextStatus, nextCommands, nextUpdateState, nextConfig] = await Promise.all([
         api.wgStatus(),
-        api.systemMode(),
         api.systemCommands(),
         api.updateStatus(),
         api.systemConfig(),
       ]);
       setStatus(nextStatus);
-      setMode(nextMode);
       setCommandState(nextCommands);
       setUpdateState(nextUpdateState);
       setConfig(nextConfig);
@@ -96,24 +92,6 @@ export default function Settings({ onStatusChange }) {
     }
   };
 
-  const handleModeToggle = async () => {
-    if (!mode) {
-      return;
-    }
-
-    setBusyMode(true);
-    try {
-      const nextMode = await api.setSystemMode(!mode.demo);
-      setMode(nextMode);
-      showToast(nextMode.message, 'success');
-      await load();
-    } catch (error) {
-      showToast(error.message, 'error');
-    } finally {
-      setBusyMode(false);
-    }
-  };
-
   const handlePresetCommand = async (commandId) => {
     setCommandBusy(commandId);
     setTerminalOutput(`$ preset:${commandId}\n`);
@@ -135,11 +113,19 @@ export default function Settings({ onStatusChange }) {
       return;
     }
 
+    if (!config?.port?.toString().trim()) {
+      showToast('Forwarded WireGuard port is required', 'error');
+      return;
+    }
+
     setConfigBusy(true);
     try {
-      const result = await api.saveSystemConfig({ endpoint: config.endpoint.trim() });
+      const result = await api.saveSystemConfig({
+        endpoint: config.endpoint.trim(),
+        port: `${config.port}`.trim(),
+      });
       setConfig(result);
-      showToast(result.message || 'Saved public endpoint', 'success');
+      showToast(result.message || 'Saved server network settings', 'success');
       await load();
     } catch (error) {
       showToast(error.message, 'error');
@@ -171,8 +157,6 @@ export default function Settings({ onStatusChange }) {
     }
   };
 
-  const modeBadgeClass = useMemo(() => (mode?.demo ? 'badge-offline' : 'badge-online'), [mode]);
-
   return (
     <div className="page">
       <Header title="Settings" subtitle="Read-only server settings and WireGuard interface controls." />
@@ -181,56 +165,33 @@ export default function Settings({ onStatusChange }) {
         <div className="card section-card">
           <div className="section-head">
             <div>
-              <h2>Mode control</h2>
-              <p className="page-sub">Switch between test mode and the real WireGuard server without editing files manually.</p>
+              <h2>Server network settings</h2>
+              <p className="page-sub">Set the public IP or hostname and the forwarded WireGuard port, then apply them directly to the server.</p>
             </div>
-            <span className={`badge ${modeBadgeClass}`}>{mode?.demo ? 'Test mode' : 'Production mode'}</span>
+            <span className="badge badge-online">Production only</span>
           </div>
 
           <div className="mode-card-grid">
             <div className="detail-item">
-              <span className="meta-label">Current mode</span>
-              <strong>{mode?.mode || '--'}</strong>
-            </div>
-            <div className="detail-item">
               <span className="meta-label">Interface target</span>
-              <strong>{mode?.interface || status?.interface || '--'}</strong>
+              <strong>{config?.interface || status?.interface || '--'}</strong>
             </div>
             <div className="detail-item">
-              <span className="meta-label">Endpoint</span>
-              <strong>{mode?.endpoint || 'Not configured'}</strong>
+              <span className="meta-label">Current endpoint</span>
+              <strong>{config?.endpoint || 'Not configured'}</strong>
             </div>
             <div className="detail-item">
-              <span className="meta-label">WireGuard port</span>
-              <strong>{mode?.port || '--'}</strong>
+              <span className="meta-label">Current forwarded port</span>
+              <strong>{config?.port || status?.listenPort || '--'}</strong>
             </div>
-          </div>
-
-          {!mode?.canSwitchToProduction ? (
-            <div className="notice">
-              {mode?.canAutoConfigure
-                ? 'Production mode will auto-configure the missing WireGuard values the first time you switch on a Linux server.'
-                : 'Production mode is blocked until real .env values exist for WG_INTERFACE, WG_SERVER_ENDPOINT, WG_SERVER_PORT, WG_SERVER_PUBLIC_KEY, and WG_SUBNET.'}
-            </div>
-          ) : null}
-
-          <div className="button-row">
-            <button
-              className={`btn ${mode?.demo ? 'btn-success' : 'btn-amber'}`}
-              type="button"
-              onClick={handleModeToggle}
-              disabled={busyMode || (mode?.demo && !mode?.canSwitchToProduction && !mode?.canAutoConfigure)}
-            >
-              {busyMode ? 'Switching…' : mode?.demo ? 'Switch to production mode' : 'Switch to test mode'}
-            </button>
           </div>
         </div>
 
         <div className="card section-card">
           <div className="section-head">
             <div>
-              <h2>Server endpoint</h2>
-              <p className="page-sub">Set the public IP or hostname that gets written to `WG_SERVER_ENDPOINT` in `.env`.</p>
+              <h2>Apply public endpoint and port</h2>
+              <p className="page-sub">These values are written into the server config and applied when you save.</p>
             </div>
           </div>
 
@@ -252,9 +213,27 @@ export default function Settings({ onStatusChange }) {
             />
           </div>
 
+          <div className="form-group">
+            <label className="form-label" htmlFor="server-port">
+              Forwarded WireGuard port
+            </label>
+            <input
+              id="server-port"
+              className="input"
+              placeholder="51820"
+              value={config?.port || ''}
+              onChange={(event) =>
+                setConfig((current) => ({
+                  ...(current || {}),
+                  port: event.target.value,
+                }))
+              }
+            />
+          </div>
+
           <div className="button-row">
             <button className="btn btn-primary" type="button" onClick={handleSaveEndpoint} disabled={configBusy}>
-              {configBusy ? 'Saving…' : 'Save public endpoint'}
+              {configBusy ? 'Saving…' : 'Save and apply network settings'}
             </button>
           </div>
         </div>

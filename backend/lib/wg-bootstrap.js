@@ -41,6 +41,15 @@ function parsePrivateKeyFromConfig(configPath) {
   return match?.[1]?.trim() || '';
 }
 
+function updateConfigValue(content, key, value) {
+  const pattern = new RegExp(`^${key}\\s*=\\s*.+$`, 'm');
+  if (pattern.test(content)) {
+    return content.replace(pattern, `${key} = ${value}`);
+  }
+
+  return `${content.trimEnd()}\n${key} = ${value}\n`;
+}
+
 function ensureWireguardInstalled() {
   try {
     run('command -v wg');
@@ -133,6 +142,47 @@ function ensureWireguardBootstrap() {
   };
 }
 
+function applyWireguardServerConfig({ endpoint, port }) {
+  if (!isLinux()) {
+    throw new Error('WireGuard server configuration can only be applied on Linux servers.');
+  }
+
+  const bootstrap = ensureWireguardBootstrap();
+  const iface = bootstrap.interface;
+  const configPath = `/etc/wireguard/${iface}.conf`;
+  const nextValues = {};
+
+  if (endpoint) {
+    nextValues.WG_SERVER_ENDPOINT = `${endpoint}`.trim();
+  }
+
+  if (port) {
+    const normalizedPort = `${port}`.trim();
+    nextValues.WG_SERVER_PORT = normalizedPort;
+
+    if (fs.existsSync(configPath)) {
+      const updatedConfig = updateConfigValue(fs.readFileSync(configPath, 'utf8'), 'ListenPort', normalizedPort);
+      fs.writeFileSync(configPath, updatedConfig, { encoding: 'utf8', mode: 0o600 });
+    }
+  }
+
+  if (Object.keys(nextValues).length > 0) {
+    envStore.updateEnvValues(nextValues);
+  }
+
+  if (port) {
+    run(`systemctl restart wg-quick@${iface}`);
+  }
+
+  return {
+    interface: iface,
+    endpoint: process.env.WG_SERVER_ENDPOINT || bootstrap.endpoint,
+    port: process.env.WG_SERVER_PORT || bootstrap.port,
+    publicKey: process.env.WG_SERVER_PUBLIC_KEY || bootstrap.publicKey,
+  };
+}
+
 module.exports = {
   ensureWireguardBootstrap,
+  applyWireguardServerConfig,
 };

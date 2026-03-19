@@ -101,6 +101,10 @@ prepare_env() {
   fi
 }
 
+enforce_production_mode() {
+  write_env_value DEMO_MODE false
+}
+
 is_placeholder_value() {
   local value="$1"
   [[ -z "${value}" || "${value}" == YOUR_* ]]
@@ -142,10 +146,9 @@ extract_private_key_from_config() {
 }
 
 ensure_wireguard_bootstrap() {
-  local auto_setup demo_mode iface subnet listen_port endpoint config_file private_key_file public_key_file private_key public_key outbound_iface
+  local auto_setup iface subnet listen_port endpoint config_file private_key_file public_key_file private_key public_key outbound_iface
 
   auto_setup="$(default_env_value AUTO_SETUP_WIREGUARD true)"
-  demo_mode="$(default_env_value DEMO_MODE true)"
 
   if [[ "${auto_setup,,}" != "true" ]]; then
     echo "Automatic WireGuard bootstrap disabled. Skipping interface setup."
@@ -216,11 +219,7 @@ EOF
     fi
   fi
 
-  if [[ "${demo_mode,,}" == "false" ]]; then
-    echo "WireGuard bootstrap complete for production mode."
-  else
-    echo "WireGuard bootstrap complete. WireGate is still in test mode until DEMO_MODE is switched to false."
-  fi
+  echo "WireGuard bootstrap complete for production mode."
 }
 
 read_env_value() {
@@ -345,7 +344,6 @@ print_summary() {
   echo "WireGuard endpoint: ${endpoint:-not set}"
   echo "WireGuard public key: ${public_key:-not set}"
   echo "Private key is stored on the server in /etc/wireguard/${iface:-wg0}.conf and /etc/wireguard/${iface:-wg0}.key"
-  echo "Set DEMO_MODE=false before production use if you are still testing in demo mode."
 }
 
 print_banner
@@ -355,6 +353,7 @@ ensure_wireguard
 ensure_node
 sync_repo
 prepare_env
+enforce_production_mode
 choose_backend_port
 ensure_wireguard_bootstrap
 install_dependencies

@@ -8,16 +8,10 @@ const statusFile = path.join(dataDir, 'update-status.json');
 const logFile = path.join(dataDir, 'update.log');
 const pidFile = path.join(dataDir, 'update.pid');
 
-let demoTimer = null;
-
 function ensureDataDir() {
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
   }
-}
-
-function isDemoMode() {
-  return `${process.env.DEMO_MODE ?? 'true'}`.toLowerCase() !== 'false';
 }
 
 function writeStatus({ status, running, message, pid = null }) {
@@ -143,7 +137,7 @@ function isProcessRunning(pid) {
 function getStatus() {
   const fileStatus = readStatusFile();
   const pid = readPid() || fileStatus.pid || null;
-  const running = fileStatus.running && (pid ? isProcessRunning(pid) || isDemoMode() : false);
+  const running = fileStatus.running && (pid ? isProcessRunning(pid) : false);
 
   return {
     ...getLocalGitSummary(),
@@ -151,62 +145,6 @@ function getStatus() {
     pid,
     running,
     log: readLogTail(),
-  };
-}
-
-function startDemoUpdate(options = {}) {
-  if (demoTimer) {
-    throw new Error('An update is already running.');
-  }
-
-  const forceInstall = Boolean(options.forceInstall);
-
-  ensureDataDir();
-  fs.writeFileSync(logFile, '', 'utf8');
-  writeStatus({
-    status: 'running',
-    running: true,
-    message: forceInstall ? 'Starting demo repair installer run.' : 'Starting demo installer update.',
-    pid: process.pid,
-  });
-
-  const lines = forceInstall
-    ? [
-        'Repair mode requested...',
-        'Running sudo ./install.sh...',
-        'Installing backend dependencies...',
-        'Installing frontend dependencies...',
-        'Building frontend assets...',
-        'Restarting wiregate service...',
-        'Repair install completed successfully.',
-      ]
-    : [
-        'Starting updater...',
-        'Running sudo ./install.sh...',
-        'Installing backend dependencies...',
-        'Installing frontend dependencies...',
-        'Building frontend assets...',
-        'Restarting wiregate service...',
-        'Installer update completed successfully.',
-      ];
-
-  let index = 0;
-  demoTimer = setInterval(() => {
-    if (index >= lines.length) {
-      clearInterval(demoTimer);
-      demoTimer = null;
-      writeStatus({ status: 'completed', running: false, message: 'Demo update completed.', pid: null });
-      return;
-    }
-
-    appendLog(lines[index]);
-    writeStatus({ status: 'running', running: true, message: lines[index], pid: process.pid });
-    index += 1;
-  }, 500);
-
-  return {
-    ok: true,
-    message: forceInstall ? 'Demo repair installer run started.' : 'Demo installer update started.',
   };
 }
 
@@ -248,12 +186,8 @@ function startRealUpdate(options = {}) {
 }
 
 function startUpdate(options = {}) {
-  if (isDemoMode()) {
-    return startDemoUpdate(options);
-  }
-
   if (process.platform !== 'linux') {
-    throw new Error('Real updates are only supported on the Ubuntu server.');
+    throw new Error('Updates are only supported on the Ubuntu server.');
   }
 
   return startRealUpdate(options);

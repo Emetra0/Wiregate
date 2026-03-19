@@ -117,7 +117,7 @@ sudo systemctl enable --now wg-quick@wg0
 sudo wg show
 ```
 
-After that, set the matching values in `.env`, especially `WG_INTERFACE`, `WG_SERVER_PORT`, `WG_SERVER_PUBLIC_KEY`, `WG_SERVER_ENDPOINT`, and `DEMO_MODE=false`.
+After that, set the matching values in `.env`, especially `WG_INTERFACE`, `WG_SERVER_PORT`, `WG_SERVER_PUBLIC_KEY`, and `WG_SERVER_ENDPOINT`.
 
 If you do not want to create the WireGuard server manually, keep `AUTO_SETUP_WIREGUARD=true` and let `install.sh` generate the initial keys and interface config for you.
 
@@ -126,7 +126,7 @@ If you do not want to create the WireGuard server manually, keep `AUTO_SETUP_WIR
 2. Make sure your WireGuard server config already exists, usually at `/etc/wireguard/wg0.conf`.
 3. Clone this repository to the server.
 4. Run `sudo ./install.sh`.
-5. Edit `.env` with real server values and set `DEMO_MODE=false`.
+5. Edit `.env` with the real public IP or hostname and the forwarded WireGuard port.
 6. Restart WireGate with `sudo systemctl restart wiregate`.
 7. If you want the VPN interface to start on boot, run `sudo systemctl enable --now wg-quick@wg0`.
 
@@ -176,15 +176,8 @@ If the installer selected a different port because `3001` was in use, check the 
 | `WG_SERVER_PUBLIC_KEY` | Public key of the server interface |
 | `WG_SUBNET` | First three octets of the WireGuard subnet, for example `10.0.0` |
 | `WG_DNS` | DNS server pushed to clients |
-| `DEMO_MODE` | When `true`, skips real WireGuard commands and returns safe demo data |
 | `ENABLE_COMMAND_CENTER` | When `true`, enables safe preset admin commands from the Settings page |
 | `AUTO_SETUP_WIREGUARD` | When `true`, `install.sh` generates a WireGuard server config and keys if the interface does not already exist |
-
-## Demo mode
-Set `DEMO_MODE=true` to run WireGate on any OS without WireGuard installed.
-This uses fake status, peer and system data so the UI can be tested safely.
-
-From the Settings page, you can switch between test mode and production mode from the UI. Production mode still requires real values for `WG_INTERFACE`, `WG_SERVER_ENDPOINT`, `WG_SERVER_PORT`, `WG_SERVER_PUBLIC_KEY`, and `WG_SUBNET`.
 
 ## Command center
 `ENABLE_COMMAND_CENTER` is enabled by default in `.env.example`. The Settings page exposes safe preset terminal actions such as service status, service logs, and WireGuard service restarts.
