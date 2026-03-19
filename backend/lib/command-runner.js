@@ -5,7 +5,7 @@ function isDemoMode() {
 }
 
 function commandCenterEnabled() {
-  return `${process.env.ENABLE_COMMAND_CENTER ?? 'false'}`.toLowerCase() === 'true';
+  return `${process.env.ENABLE_COMMAND_CENTER ?? 'true'}`.toLowerCase() !== 'false';
 }
 
 function getInterfaceName() {
@@ -68,13 +68,13 @@ function listCommands() {
     commands,
     message: commandCenterEnabled()
       ? 'Restricted command center is enabled.'
-      : 'Command center is disabled. Set ENABLE_COMMAND_CENTER=true in .env to enable safe predefined commands.',
+      : 'Command center is disabled. Set ENABLE_COMMAND_CENTER=false only if you want to turn off the safe predefined commands.',
   };
 }
 
 function runCommand(commandId) {
   if (!commandCenterEnabled()) {
-    throw new Error('Command center is disabled. Set ENABLE_COMMAND_CENTER=true in .env to enable it.');
+    throw new Error('Command center is disabled. Set ENABLE_COMMAND_CENTER=true in .env to enable it again.');
   }
 
   const commands = getCommandDefinitions();
