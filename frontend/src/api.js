@@ -34,6 +34,7 @@ export const api = {
   wgStop: () => request('/api/wireguard/stop', { method: 'POST' }),
   wgRestart: () => request('/api/wireguard/restart', { method: 'POST' }),
   getUsers: () => request('/api/users'),
+  getUserConfig: (pubKey) => request(`/api/users/${encodeURIComponent(pubKey)}/config`),
   createUser: (body) =>
     request('/api/users', {
       method: 'POST',

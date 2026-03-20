@@ -9,7 +9,7 @@ function getTerminalWsUrl() {
   return `${protocol}//${window.location.host}/api/system/terminal/ws`;
 }
 
-const ServerTerminal = forwardRef(function ServerTerminal({ className = '', height = '68vh' }, ref) {
+const ServerTerminal = forwardRef(function ServerTerminal({ className = '', height = '68vh', mobileHeight = '56vh' }, ref) {
   const { showToast } = useToast();
   const hostRef = useRef(null);
   const terminalRef = useRef(null);
@@ -53,8 +53,13 @@ const ServerTerminal = forwardRef(function ServerTerminal({ className = '', heig
       );
     };
 
-    socket.addEventListener('open', () => {
+    const fitTerminal = () => {
+      fitAddon.fit();
       sendResize();
+    };
+
+    socket.addEventListener('open', () => {
+      fitTerminal();
     });
 
     socket.addEventListener('message', (event) => {
@@ -65,7 +70,7 @@ const ServerTerminal = forwardRef(function ServerTerminal({ className = '', heig
         if (type === 'snapshot') {
           terminal.clear();
           terminal.write(payload.output || '');
-          sendResize();
+          fitTerminal();
           return;
         }
 
@@ -109,14 +114,17 @@ const ServerTerminal = forwardRef(function ServerTerminal({ className = '', heig
     });
 
     const resizeObserver = new ResizeObserver(() => {
-      fitAddon.fit();
-      sendResize();
+      fitTerminal();
     });
     resizeObserver.observe(hostRef.current);
+
+    window.addEventListener('orientationchange', fitTerminal);
+    window.requestAnimationFrame(fitTerminal);
 
     return () => {
       dataDisposable.dispose();
       resizeObserver.disconnect();
+      window.removeEventListener('orientationchange', fitTerminal);
       socket.close();
       terminal.dispose();
     };
@@ -152,7 +160,13 @@ const ServerTerminal = forwardRef(function ServerTerminal({ className = '', heig
     },
   }));
 
-  return <div ref={hostRef} className={`vm-terminal-host ${className}`.trim()} style={{ height, minHeight: height }} />;
+  return (
+    <div
+      ref={hostRef}
+      className={`vm-terminal-host ${className}`.trim()}
+      style={{ '--terminal-height': height, '--terminal-mobile-height': mobileHeight }}
+    />
+  );
 });
 
 export default ServerTerminal;

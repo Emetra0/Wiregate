@@ -19,6 +19,18 @@ function downloadConfigFile(name, config) {
   URL.revokeObjectURL(url);
 }
 
+function formatLastSeen(user) {
+  if (user.connected) {
+    return 'Active now';
+  }
+
+  if (!user.lastOnlineAt) {
+    return 'Never connected';
+  }
+
+  return new Date(user.lastOnlineAt).toLocaleString();
+}
+
 export default function Users() {
   const { showToast } = useToast();
   const [users, setUsers] = useState([]);
@@ -26,8 +38,9 @@ export default function Users() {
   const [submitting, setSubmitting] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [confirmState, setConfirmState] = useState(null);
+  const [loadingConfigKey, setLoadingConfigKey] = useState('');
   const [configState, setConfigState] = useState(null);
-  const [form, setForm] = useState({ name: '', email: '' });
+  const [form, setForm] = useState({ name: '' });
   const [configCache, setConfigCache] = useState({});
 
   const loadUsers = useCallback(async () => {
@@ -80,8 +93,21 @@ export default function Users() {
 
   const openConfigModal = useCallback((user, config) => {
     setConfigCache((current) => ({ ...current, [user.publicKey]: config }));
-    setConfigState({ user, config, qrUrl: null });
+    setConfigState({ user, config, qrUrl: null, showConfigText: false });
   }, []);
+
+  const getStoredConfig = useCallback(
+    async (user) => {
+      if (configCache[user.publicKey]) {
+        return configCache[user.publicKey];
+      }
+
+      const result = await api.getUserConfig(user.publicKey);
+      setConfigCache((current) => ({ ...current, [user.publicKey]: result.config }));
+      return result.config;
+    },
+    [configCache]
+  );
 
   const handleCreateUser = async (event) => {
     event.preventDefault();
@@ -89,7 +115,7 @@ export default function Users() {
     try {
       const result = await api.createUser(form);
       setAddOpen(false);
-      setForm({ name: '', email: '' });
+      setForm({ name: '' });
       openConfigModal(result.user, result.config);
       await loadUsers();
       showToast('User created', 'success');
@@ -100,14 +126,36 @@ export default function Users() {
     }
   };
 
-  const handleDownload = (user) => {
-    const config = configCache[user.publicKey];
-    if (!config) {
-      showToast('Config is not stored. Regenerate keys to issue a new one.', 'info');
-      return;
-    }
-    openConfigModal(user, config);
-  };
+  const handleShowQr = useCallback(
+    async (user) => {
+      setLoadingConfigKey(user.publicKey);
+      try {
+        const config = await getStoredConfig(user);
+        openConfigModal(user, config);
+      } catch (error) {
+        showToast(error.message, 'error');
+      } finally {
+        setLoadingConfigKey('');
+      }
+    },
+    [getStoredConfig, openConfigModal, showToast]
+  );
+
+  const handleDownload = useCallback(
+    async (user) => {
+      setLoadingConfigKey(user.publicKey);
+      try {
+        const config = await getStoredConfig(user);
+        downloadConfigFile(user.name, config);
+        showToast('Config downloaded', 'success');
+      } catch (error) {
+        showToast(error.message, 'error');
+      } finally {
+        setLoadingConfigKey('');
+      }
+    },
+    [getStoredConfig, showToast]
+  );
 
   const handleConfirmDelete = async () => {
     if (!confirmState?.user) return;
@@ -170,6 +218,8 @@ export default function Users() {
             <UserCard
               key={user.publicKey}
               user={user}
+              busy={submitting || loadingConfigKey === user.publicKey}
+              onShowQr={handleShowQr}
               onDownload={handleDownload}
               onRegenerate={(selectedUser) => setConfirmState({ type: 'regenerate', user: selectedUser })}
               onDelete={(selectedUser) => setConfirmState({ type: 'delete', user: selectedUser })}
@@ -179,7 +229,7 @@ export default function Users() {
       ) : !loading ? (
         <div className="card empty">
           <div className="empty-icon">⊕</div>
-          <p>No VPN users yet. Add the first user to generate a config.</p>
+          <p>No VPN users yet. Add the first user to generate a QR code and config.</p>
         </div>
       ) : null}
 
@@ -207,19 +257,8 @@ export default function Users() {
                 id="name"
                 className="input"
                 value={form.name}
-                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                onChange={(event) => setForm({ name: event.target.value })}
                 required
-              />
-            </div>
-            <div className="form-group">
-              <label className="form-label" htmlFor="email">
-                Email
-              </label>
-              <input
-                id="email"
-                className="input"
-                value={form.email}
-                onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
               />
             </div>
           </form>
@@ -247,16 +286,37 @@ export default function Users() {
           }
         >
           <div className="notice warning-notice">
-            Save this config now. The private key is not stored and cannot be recovered.
+            QR codes stay available for saved users. Keep access to this page limited because anyone here can re-import the profile.
           </div>
-          <div className="config-modal-grid">
-            <pre className="config-box">{configState.config}</pre>
+          <div className="config-modal-grid qr-only-grid">
             <div className="qr-panel">
               {configState.qrUrl ? (
                 <img src={configState.qrUrl} alt="WireGuard config QR code" className="qr-image" />
               ) : (
                 <div className="empty small-empty">Generating QR code…</div>
               )}
+            </div>
+            <div className="config-summary-panel">
+              <div className="config-summary-card">
+                <span className="meta-label">User</span>
+                <strong>{configState.user.name}</strong>
+              </div>
+              <div className="config-summary-card">
+                <span className="meta-label">VPN IP</span>
+                <strong className="mono-text accent-text">{configState.user.ip}</strong>
+              </div>
+              <div className="config-summary-card">
+                <span className="meta-label">Last online</span>
+                <strong>{formatLastSeen(configState.user)}</strong>
+              </div>
+              <button
+                className="btn btn-ghost"
+                type="button"
+                onClick={() => setConfigState((current) => ({ ...current, showConfigText: !current.showConfigText }))}
+              >
+                {configState.showConfigText ? 'Hide config text' : 'Reveal config text'}
+              </button>
+              {configState.showConfigText ? <pre className="config-box config-box-revealed">{configState.config}</pre> : null}
             </div>
           </div>
         </Modal>

@@ -9,10 +9,10 @@ export default function TerminalPage() {
         <div className="section-head">
           <div>
             <h2>Ubuntu shell</h2>
-            <p className="page-sub">This opens the real shell on the Ubuntu server.</p>
+            <p className="page-sub">This opens the real shell on the Ubuntu server and auto-fits for desktop and phone screens.</p>
           </div>
         </div>
-        <ServerTerminal />
+        <ServerTerminal height="68vh" mobileHeight="calc(100dvh - 230px)" />
       </div>
     </div>
   );

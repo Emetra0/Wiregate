@@ -7,6 +7,28 @@ const wgManager = require('../lib/wg-manager');
 
 const router = express.Router();
 
+function sanitizeUser(user) {
+  const { clientConfig, ...safeUser } = user;
+  return safeUser;
+}
+
+function buildUserResponse(user, peer) {
+  const storedLastOnlineAt = Number(user.lastOnlineAt || user.latestHandshake || 0);
+  const peerLatestHandshake = Number(peer?.latestHandshake || 0);
+  const lastOnlineAt = peerLatestHandshake || storedLastOnlineAt;
+
+  return {
+    ...sanitizeUser(user),
+    endpoint: peer?.endpoint ?? null,
+    allowedIPs: peer?.allowedIPs ?? `${user.ip}/32`,
+    latestHandshake: peerLatestHandshake,
+    lastOnlineAt,
+    rxBytes: peer?.rxBytes ?? 0,
+    txBytes: peer?.txBytes ?? 0,
+    connected: peer?.connected ?? false,
+  };
+}
+
 function buildUserConfig(privateKey, ip) {
   return buildClientConfig({
     privateKey,
@@ -23,18 +45,28 @@ router.get('/', (_req, res) => {
     const users = store.getAll();
     const peers = wgManager.getPeers();
     const peerMap = new Map(peers.map((peer) => [peer.publicKey, peer]));
+    const updates = [];
 
     const merged = users.map((user) => {
       const peer = peerMap.get(user.publicKey);
-      return {
-        ...user,
-        endpoint: peer?.endpoint ?? null,
-        allowedIPs: peer?.allowedIPs ?? `${user.ip}/32`,
-        latestHandshake: peer?.latestHandshake ?? 0,
-        rxBytes: peer?.rxBytes ?? 0,
-        txBytes: peer?.txBytes ?? 0,
-        connected: peer?.connected ?? false,
-      };
+      const peerLatestHandshake = Number(peer?.latestHandshake || 0);
+
+      if (peerLatestHandshake && peerLatestHandshake !== Number(user.lastOnlineAt || 0)) {
+        updates.push({
+          publicKey: user.publicKey,
+          user: {
+            ...user,
+            lastOnlineAt: peerLatestHandshake,
+            latestHandshake: peerLatestHandshake,
+          },
+        });
+      }
+
+      return buildUserResponse(user, peer);
+    });
+
+    updates.forEach(({ publicKey, user }) => {
+      store.replace(publicKey, user);
     });
 
     res.json(merged);
@@ -54,6 +86,7 @@ router.post('/', (req, res) => {
 
     const { privateKey, publicKey } = generateKeyPair();
     const ip = store.nextIP();
+    const config = buildUserConfig(privateKey, ip);
     wgManager.addPeer(publicKey, ip);
 
     const user = {
@@ -63,19 +96,37 @@ router.post('/', (req, res) => {
       publicKey,
       ip,
       createdAt: new Date().toISOString(),
+      latestHandshake: 0,
+      lastOnlineAt: 0,
+      clientConfig: config,
     };
 
     store.add(user);
 
     return res.status(201).json({
-      user: {
-        ...user,
-        connected: false,
-        latestHandshake: 0,
-        rxBytes: 0,
-        txBytes: 0,
-      },
-      config: buildUserConfig(privateKey, ip),
+      user: buildUserResponse(user),
+      config,
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/:publicKey/config', (req, res) => {
+  try {
+    const user = store.getByPublicKey(req.params.publicKey);
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (!user.clientConfig) {
+      return res.status(404).json({ error: 'Config is not stored for this user. Regenerate keys to create a new one.' });
+    }
+
+    return res.json({
+      user: sanitizeUser(user),
+      config: user.clientConfig,
     });
   } catch (error) {
     return res.status(500).json({ error: error.message });
@@ -112,26 +163,23 @@ router.post('/:publicKey/regenerate', (req, res) => {
     }
 
     const { privateKey, publicKey } = generateKeyPair();
+    const config = buildUserConfig(privateKey, existingUser.ip);
     wgManager.removePeer(existingUser.publicKey);
     wgManager.addPeer(publicKey, existingUser.ip);
 
     const updatedUser = {
       ...existingUser,
       publicKey,
+      latestHandshake: 0,
+      lastOnlineAt: 0,
+      clientConfig: config,
     };
 
-    store.remove(existingUser.publicKey);
-    store.add(updatedUser);
+    store.replace(existingUser.publicKey, updatedUser);
 
     return res.json({
-      user: {
-        ...updatedUser,
-        connected: false,
-        latestHandshake: 0,
-        rxBytes: 0,
-        txBytes: 0,
-      },
-      config: buildUserConfig(privateKey, existingUser.ip),
+      user: buildUserResponse(updatedUser),
+      config,
     });
   } catch (error) {
     return res.status(500).json({ error: error.message });

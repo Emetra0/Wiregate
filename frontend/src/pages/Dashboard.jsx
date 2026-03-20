@@ -28,6 +28,11 @@ function formatRelativeTime(timestamp) {
   return `${Math.floor(diffSeconds / 86400)} days ago`;
 }
 
+function formatLastSeen(user) {
+  if (user.connected) return 'Active now';
+  return formatRelativeTime(user.lastOnlineAt || user.latestHandshake);
+}
+
 function truncateMiddle(value = '') {
   if (!value) return 'Unavailable';
   if (value.length <= 20) return value;
@@ -196,7 +201,7 @@ export default function Dashboard({ onStatusChange }) {
                   <tr key={user.publicKey}>
                     <td>
                       <div className="table-name">{user.name}</div>
-                      <div className="muted-text">{user.email || 'No email'}</div>
+                      <div className="muted-text">Created {new Date(user.createdAt).toLocaleDateString()}</div>
                     </td>
                     <td className="mono-text">{user.ip}</td>
                     <td>
@@ -204,7 +209,7 @@ export default function Dashboard({ onStatusChange }) {
                         {user.connected ? 'Online' : 'Offline'}
                       </span>
                     </td>
-                    <td>{formatRelativeTime(user.latestHandshake)}</td>
+                    <td>{formatLastSeen(user)}</td>
                   </tr>
                 ))}
               </tbody>
