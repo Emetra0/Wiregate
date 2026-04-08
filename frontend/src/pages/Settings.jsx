@@ -523,7 +523,7 @@ export default function Settings({ onStatusChange }) {
           <div className="about-list">
             <div className="detail-item">
               <span className="meta-label">Version</span>
-              <strong>{systemInfo?.app?.displayVersion ? `v${systemInfo.app.displayVersion}` : 'v1.0.0'}</strong>
+              <strong>{systemInfo?.app?.displayVersion ? `v${systemInfo.app.displayVersion}` : 'v1.0.1'}</strong>
             </div>
             <div className="detail-item">
               <span className="meta-label">Build number</span>
@@ -533,7 +533,7 @@ export default function Settings({ onStatusChange }) {
               <span className="meta-label">Latest change</span>
               <strong>{systemInfo?.app?.latestChange || '--'}</strong>
             </div>
-            <a className="resource-link" href="https://github.com/Slimetopian/Wiregate" target="_blank" rel="noreferrer">
+            <a className="resource-link" href="https://github.com/Emetra0/Wiregate" target="_blank" rel="noreferrer">
               GitHub repository
             </a>
             <a className="resource-link" href="https://www.wireguard.com" target="_blank" rel="noreferrer">

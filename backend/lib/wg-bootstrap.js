@@ -211,6 +211,25 @@ function openFirewallPort(port) {
   }
 }
 
+function closeFirewallPort(port) {
+  const normalizedPort = Number(port);
+  if (!Number.isFinite(normalizedPort) || normalizedPort < 1 || normalizedPort > 65535) {
+    return;
+  }
+
+  try {
+    run(`iptables -D INPUT -p udp --dport ${normalizedPort} -j ACCEPT`);
+  } catch {
+    // Ignore missing rules when the old port was never opened explicitly.
+  }
+
+  try {
+    run('command -v ufw >/dev/null 2>&1 && ufw --force delete allow ' + normalizedPort + '/udp');
+  } catch {
+    // Ignore ufw failures; the next active port is opened explicitly.
+  }
+}
+
 function isFirewallPortOpen(port) {
   const normalizedPort = Number(port);
   if (!Number.isFinite(normalizedPort) || normalizedPort < 1 || normalizedPort > 65535) {
@@ -222,6 +241,21 @@ function isFirewallPortOpen(port) {
     return true;
   } catch {
     return false;
+  }
+}
+
+function restartWireguardInterface(iface) {
+  try {
+    run(`systemctl restart wg-quick@${iface}`);
+    return;
+  } catch {
+    try {
+      run(`wg-quick down ${iface}`);
+    } catch {
+      // Ignore down failures and still attempt to bring the interface back up.
+    }
+
+    run(`wg-quick up ${iface}`);
   }
 }
 
@@ -333,7 +367,11 @@ function applyWireguardServerConfig({ endpoint, port, subnet }) {
   const iface = bootstrap.interface;
   const configPath = `/etc/wireguard/${iface}.conf`;
   const previousSubnet = process.env.WG_SUBNET || bootstrap.subnet;
+  const previousPort = process.env.WG_SERVER_PORT || bootstrap.port;
   const nextValues = {};
+  let nextPort = `${previousPort}`.trim();
+  let nextSubnet = `${previousSubnet}`.trim();
+  let needsInterfaceReload = false;
 
   if (endpoint) {
     nextValues.WG_SERVER_ENDPOINT = `${endpoint}`.trim();
@@ -342,18 +380,22 @@ function applyWireguardServerConfig({ endpoint, port, subnet }) {
   if (port) {
     const normalizedPort = `${port}`.trim();
     nextValues.WG_SERVER_PORT = normalizedPort;
+    nextPort = normalizedPort;
+    needsInterfaceReload = normalizedPort !== `${previousPort}`.trim();
   }
 
   if (subnet) {
-    nextValues.WG_SUBNET = `${subnet}`.trim();
+    const normalizedSubnet = `${subnet}`.trim();
+    nextValues.WG_SUBNET = normalizedSubnet;
+    nextSubnet = normalizedSubnet;
+    needsInterfaceReload = needsInterfaceReload || normalizedSubnet !== `${previousSubnet}`.trim();
   }
 
   if (fs.existsSync(configPath)) {
     let updatedConfig = fs.readFileSync(configPath, 'utf8');
-    const nextPort = `${port || process.env.WG_SERVER_PORT || bootstrap.port}`.trim();
 
     if (port) {
-      updatedConfig = updateConfigValue(updatedConfig, 'ListenPort', `${port}`.trim());
+      updatedConfig = updateConfigValue(updatedConfig, 'ListenPort', nextPort);
     }
 
     if (subnet) {
@@ -362,7 +404,7 @@ function applyWireguardServerConfig({ endpoint, port, subnet }) {
         throw new Error('Unable to detect the default outbound interface.');
       }
 
-      updatedConfig = updateSubnetReferences(updatedConfig, previousSubnet, `${subnet}`.trim(), iface, outboundIface, nextPort);
+      updatedConfig = updateSubnetReferences(updatedConfig, previousSubnet, nextSubnet, iface, outboundIface, nextPort);
     } else if (port) {
       const outboundIface = getDefaultInterface();
       if (!outboundIface) {
@@ -381,11 +423,19 @@ function applyWireguardServerConfig({ endpoint, port, subnet }) {
   }
 
   if (port) {
-    openFirewallPort(`${port}`.trim());
+    openFirewallPort(nextPort);
+
+    if (`${previousPort}`.trim() !== nextPort) {
+      closeFirewallPort(previousPort);
+    }
   }
 
   if (subnet) {
-    migrateUsersToSubnet(iface, previousSubnet, `${subnet}`.trim());
+    migrateUsersToSubnet(iface, previousSubnet, nextSubnet);
+  }
+
+  if (needsInterfaceReload) {
+    restartWireguardInterface(iface);
   }
 
   return {

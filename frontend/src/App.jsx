@@ -27,7 +27,7 @@ function useIsMobile(breakpoint = 860) {
 function AppFrame() {
   const { showToast } = useToast();
   const [wgStatus, setWgStatus] = useState(null);
-  const [appVersion, setAppVersion] = useState('v1.0.0');
+  const [appVersion, setAppVersion] = useState('v1.0.1');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const isMobile = useIsMobile();
   const location = useLocation();
@@ -36,7 +36,7 @@ function AppFrame() {
     try {
       const [status, system] = await Promise.all([api.wgStatus(), api.system()]);
       setWgStatus(status);
-      setAppVersion(system?.app?.displayVersion ? `v${system.app.displayVersion}` : 'v1.0.0');
+      setAppVersion(system?.app?.displayVersion ? `v${system.app.displayVersion}` : 'v1.0.1');
     } catch (error) {
       showToast(error.message, 'error');
     }

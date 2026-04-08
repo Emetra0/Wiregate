@@ -31,8 +31,8 @@ No cloud services. No subscriptions. Fully open source.
 This is the fastest path on a fresh Ubuntu server. The installer checks and installs the required repo dependencies, including Node.js 18+, WireGuard, `git`, and `iproute2` when they are missing.
 
 ```bash
-git clone https://github.com/Slimetopian/Wiregate.git
-cd wiregate
+git clone https://github.com/Emetra0/Wiregate.git
+cd Wiregate
 chmod +x install.sh
 sudo ./install.sh
 ```
@@ -197,7 +197,7 @@ If you want the GUI to repair the install, use the repair button. It reruns the 
 You can also run the same update manually on Ubuntu:
 
 ```bash
-cd wiregate
+cd Wiregate
 sudo ./install.sh
 ```
 
@@ -205,7 +205,7 @@ sudo ./install.sh
 If you want to wipe the current WireGate install and start over, run:
 
 ```bash
-cd wiregate
+cd Wiregate
 chmod +x uninstall.sh
 sudo ./uninstall.sh
 sudo ./install.sh
@@ -223,7 +223,7 @@ What `uninstall.sh` removes:
 If you want to keep the existing WireGuard interface files and only wipe WireGate itself:
 
 ```bash
-cd wiregate
+cd Wiregate
 sudo REMOVE_WIREGUARD=false ./uninstall.sh
 sudo ./install.sh
 ```
@@ -255,8 +255,8 @@ npm run dev
 ## Running on a real Ubuntu server
 ```bash
 ssh user@your-server-ip
-git clone https://github.com/Slimetopian/Wiregate.git
-cd wiregate
+git clone https://github.com/Emetra0/Wiregate.git
+cd Wiregate
 chmod +x install.sh
 sudo ./install.sh
 sudo nano .env
