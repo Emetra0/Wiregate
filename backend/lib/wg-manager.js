@@ -1,4 +1,5 @@
 const { execSync, spawn } = require('child_process');
+const { upsertPeerInConfig, removePeerFromConfig } = require('./wg-config');
 
 function getInterfaceName() {
   return process.env.WG_INTERFACE || 'wg0';
@@ -135,17 +136,17 @@ function getPeers() {
 function addPeer(publicKey, ip) {
   const iface = getInterfaceName();
 
+  upsertPeerInConfig(iface, publicKey, `${ip}/32`);
   const output = runCommand(`sudo wg set ${iface} peer ${publicKey} allowed-ips ${ip}/32`);
-  const saveOutput = runCommand(`sudo wg-quick save ${iface}`);
-  return { ok: true, output: [output, saveOutput].filter(Boolean).join('\n') || 'Peer added' };
+  return { ok: true, output: [output].filter(Boolean).join('\n') || 'Peer added' };
 }
 
 function removePeer(publicKey) {
   const iface = getInterfaceName();
 
+  removePeerFromConfig(iface, publicKey);
   const output = runCommand(`sudo wg set ${iface} peer ${publicKey} remove`);
-  const saveOutput = runCommand(`sudo wg-quick save ${iface}`);
-  return { ok: true, output: [output, saveOutput].filter(Boolean).join('\n') || 'Peer removed' };
+  return { ok: true, output: [output].filter(Boolean).join('\n') || 'Peer removed' };
 }
 
 function startInterface() {

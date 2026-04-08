@@ -2,6 +2,7 @@ const fs = require('fs');
 const { execSync } = require('child_process');
 const envStore = require('./env-store');
 const store = require('./store');
+const { upsertPeerInConfig } = require('./wg-config');
 
 function run(command) {
   return execSync(command, {
@@ -174,13 +175,9 @@ function migrateUsersToSubnet(iface, previousSubnet, nextSubnet) {
     } catch {
       // Ignore missing peers during migration; stored user IP is still updated.
     }
-  });
 
-  try {
-    run(`sudo wg-quick save ${iface}`);
-  } catch {
-    // Ignore save failures here; the service restart will report problems visibly.
-  }
+    upsertPeerInConfig(iface, user.publicKey, `${nextIp}/32`);
+  });
 }
 
 function ensureWireguardInstalled() {
@@ -284,6 +281,8 @@ function ensureWireguardBootstrap() {
 
   let privateKey = '';
   let publicKey = '';
+  let activeSubnet = subnet;
+  let activePort = port;
 
   if (fs.existsSync(configPath)) {
     privateKey = parsePrivateKeyFromConfig(configPath);
@@ -299,7 +298,11 @@ function ensureWireguardBootstrap() {
     const existingConfig = fs.readFileSync(configPath, 'utf8');
     const currentPort = parseConfigValue(existingConfig, 'ListenPort') || port;
     const currentSubnet = parseSubnetFromAddress(parseConfigValue(existingConfig, 'Address')) || subnet;
-    const normalizedConfig = updateSubnetReferences(existingConfig, currentSubnet, currentSubnet, iface, outboundIface, currentPort);
+    activePort = currentPort;
+    activeSubnet = currentSubnet;
+    let normalizedConfig = updateSubnetReferences(existingConfig, currentSubnet, currentSubnet, iface, outboundIface, currentPort);
+    normalizedConfig = updateConfigValue(normalizedConfig, 'ListenPort', currentPort);
+    normalizedConfig = updateConfigValue(normalizedConfig, 'SaveConfig', 'false');
 
     if (normalizedConfig !== existingConfig) {
       fs.writeFileSync(configPath, normalizedConfig, { encoding: 'utf8', mode: 0o600 });
@@ -323,7 +326,7 @@ function ensureWireguardBootstrap() {
         `Address = ${subnet}.1/24`,
         `ListenPort = ${port}`,
         `PrivateKey = ${privateKey}`,
-        'SaveConfig = true',
+        'SaveConfig = false',
         `PostUp = ${buildPostUp(iface, subnet, outboundIface, port)}`,
         `PostDown = ${buildPostDown(iface, subnet, outboundIface, port)}`,
         '',
@@ -342,16 +345,16 @@ function ensureWireguardBootstrap() {
   const nextEndpoint = isPlaceholder(endpoint) ? getPrimaryIp() : endpoint;
   envStore.updateEnvValues({
     WG_INTERFACE: iface,
-    WG_SUBNET: subnet,
-    WG_SERVER_PORT: port,
+    WG_SUBNET: activeSubnet,
+    WG_SERVER_PORT: activePort,
     WG_SERVER_PUBLIC_KEY: publicKey,
     WG_SERVER_ENDPOINT: nextEndpoint,
   });
 
   return {
     interface: iface,
-    subnet,
-    port,
+    subnet: activeSubnet,
+    port: activePort,
     endpoint: nextEndpoint,
     publicKey,
     configPath,
@@ -393,6 +396,7 @@ function applyWireguardServerConfig({ endpoint, port, subnet }) {
 
   if (fs.existsSync(configPath)) {
     let updatedConfig = fs.readFileSync(configPath, 'utf8');
+    updatedConfig = updateConfigValue(updatedConfig, 'SaveConfig', 'false');
 
     if (port) {
       updatedConfig = updateConfigValue(updatedConfig, 'ListenPort', nextPort);

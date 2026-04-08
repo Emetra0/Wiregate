@@ -44,7 +44,7 @@ export default function Sidebar({ wgOnline, appVersion, isMobile = false, mobile
       </div>
 
       <div className="sidebar-footer">
-        <div>{appVersion || 'v1.0.1'}</div>
+        <div>{appVersion || 'v1.0.2'}</div>
         <a href="https://github.com/Emetra0/Wiregate" target="_blank" rel="noreferrer">
           GitHub
         </a>

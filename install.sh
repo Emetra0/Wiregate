@@ -244,7 +244,7 @@ ensure_wireguard_bootstrap() {
 Address = ${subnet}.1/24
 ListenPort = ${listen_port}
 PrivateKey = ${private_key}
-SaveConfig = true
+SaveConfig = false
 PostUp = iptables -A FORWARD -i ${iface} -j ACCEPT; iptables -A FORWARD -o ${iface} -j ACCEPT; iptables -t nat -A POSTROUTING -s ${subnet}.0/24 -o ${outbound_iface} -j MASQUERADE
 PostDown = iptables -D FORWARD -i ${iface} -j ACCEPT; iptables -D FORWARD -o ${iface} -j ACCEPT; iptables -t nat -D POSTROUTING -s ${subnet}.0/24 -o ${outbound_iface} -j MASQUERADE
 EOF

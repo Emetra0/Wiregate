@@ -523,7 +523,7 @@ export default function Settings({ onStatusChange }) {
           <div className="about-list">
             <div className="detail-item">
               <span className="meta-label">Version</span>
-              <strong>{systemInfo?.app?.displayVersion ? `v${systemInfo.app.displayVersion}` : 'v1.0.1'}</strong>
+              <strong>{systemInfo?.app?.displayVersion ? `v${systemInfo.app.displayVersion}` : 'v1.0.2'}</strong>
             </div>
             <div className="detail-item">
               <span className="meta-label">Build number</span>
